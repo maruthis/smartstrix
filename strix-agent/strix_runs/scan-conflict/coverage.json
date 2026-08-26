@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-26 09:29:47 UTC",
+  "run_id": "scan-conflict",
+  "run_name": "scan-conflict",
+  "scope": {
+    "targets": [],
+    "scan_mode": "deep",
+    "scope_mode": "auto",
+    "diff_scope": {
+      "active": false
+    },
+    "instruction": ""
+  },
+  "summary": {
+    "surfaces_reviewed": 0,
+    "outcomes": {},
+    "findings_filed": 0,
+    "gaps": 0
+  },
+  "machine_observed": {
+    "agents": [],
+    "skills_exercised": [],
+    "findings_filed": 0,
+    "source": "runtime"
+  },
+  "completeness": {
+    "complete": false,
+    "scan_status": "failed",
+    "exit_reason": null,
+    "caveats": [
+      "The scan ended with status 'failed' rather than completing, so coverage reflects only the work finished before it stopped."
+    ]
+  },
+  "entries": [],
+  "gaps": []
+}

@@ -1,0 +1,61 @@
+[project]
+name = "strix-saas-backend"
+version = "0.1.0"
+description = "Multi-tenant control-plane API for the Strix SaaS dashboard (org accounts, repos, domains, pentests, issues, PR reviews, knowledge, chat, billing)."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "sqlalchemy>=2.0.35",
+  "pydantic[email]>=2.9.0",
+  "pydantic-settings>=2.5.0",
+  "python-multipart>=0.0.12",
+  "itsdangerous>=2.2.0",
+  "httpx>=0.27.0",
+  "cryptography>=42.0.0",
+  "xhtml2pdf>=0.2.16",
+  "croniter>=2.0.0",
+  "alembic>=1.19.1",
+]
+
+[project.optional-dependencies]
+# Enables real pentest execution via the upstream strix engine (requires
+# Docker + LLM credentials). Off by default; scaffold runs a mock scanner.
+real-scan = [
+  "strix-agent",
+]
+
+[tool.uv.sources]
+strix-agent = { path = "../..", editable = true }
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.24.0",
+  "pytest-cov>=6.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = [".", "../.."]
+
+[tool.coverage.run]
+source = ["app"]
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true
+exclude_lines = [
+  "pragma: no cover",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+]

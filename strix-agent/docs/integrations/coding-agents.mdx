@@ -1,0 +1,62 @@
+---
+title: "Coding Agents"
+description: "Use Strix from Claude Code, Cursor, Codex, and other AI agents"
+---
+
+Strix is built to be driven by AI coding agents. Install the official agent skills and your agent knows how to run pentests, remediate findings, and wire Strix into CI.
+
+## Install the Skills
+
+Works with any agent that supports the open [SKILL.md standard](https://agentskills.io) — Claude Code, Cursor, Codex, Gemini CLI, OpenCode, and dozens more:
+
+```bash
+npx skills add maruthis/strix
+```
+
+| Skill | What your agent learns |
+|-------|------------------------|
+| `penetration-testing-with-strix` | Run headless scans against code, URLs, domains, or IPs with budget caps, and read the results |
+| `fix-security-vulnerabilities-with-strix` | Triage findings, fix root causes, and re-run Strix to verify each fix |
+| `ci-security-scanning-with-strix` | Add PR security scanning to GitHub Actions or any CI |
+| `application-security-testing` | Assess a whole product: choose the right test for each asset, then rank the findings into one remediation plan |
+| `web-app-penetration-testing` | Black-box pentest of a live web app or staging site — scope, credentials, and multi-account access-control testing |
+| `api-security-testing` | Test a REST/GraphQL API against the OWASP API Security Top 10 — schema-driven enumeration, BOLA/IDOR, authz |
+| `owasp-top-10-testing` | Systematic OWASP Top 10 assessment with honest per-category coverage |
+| `find-security-vulnerabilities-in-code` | White-box security review of a repo or working tree, with exploits to confirm findings |
+
+Install a single skill with `npx skills add maruthis/strix --skill penetration-testing-with-strix`, or use one without installing:
+
+```bash
+npx skills use maruthis/strix@penetration-testing-with-strix | claude
+```
+
+All of these skills install and run this fork
+(`pip install "strix-agent @ git+https://github.com/maruthis/strix"`), not the
+upstream `strix-agent` package, so an agent following them gets this fork's
+own changes rather than the vendor's. Runs locally in a Docker sandbox with
+your own LLM key — free, fully local, air-gap capable.
+
+## Agent-Friendly Interfaces
+
+Everything an agent needs is machine-readable:
+
+- **Headless CLI** — `strix -n` runs without the TUI and exits with `0` (clean), `1` (error), or `2` (vulnerabilities found).
+- **Structured results** — every run writes `vulnerabilities.json`, `vulnerabilities.csv`, `findings.sarif` (SARIF 2.1.0), and per-finding Markdown under `strix_runs/<run-name>/`.
+- **Budget controls** — `--max-budget` and `--max-turns` give agents hard cost/time caps.
+- **`AGENTS.md`** — the [repository's agent guide](https://github.com/maruthis/strix/blob/main/AGENTS.md) with a quick reference.
+
+## Example Prompts
+
+Once the skills are installed, prompts like these just work:
+
+```text
+Pentest this repo with Strix (quick mode, $10 budget) and summarize the findings.
+```
+
+```text
+Fix all critical and high findings from the last Strix run, then re-scan to verify.
+```
+
+```text
+Add Strix security scanning to our GitHub Actions so every PR gets tested.
+```

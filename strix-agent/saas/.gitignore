@@ -1,0 +1,15 @@
+backend/.venv/
+backend/*.db
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.env
+backend/.coverage
+backend/.pytest_cache/
+backend/htmlcov/
+
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/tsconfig.tsbuildinfo
+frontend/.vite/
+frontend/coverage/

@@ -1,0 +1,38 @@
+{
+  "run_id": "scan-default",
+  "run_name": "scan-default",
+  "start_time": "2026-08-26T06:55:57.101733+00:00",
+  "end_time": "2026-08-26T09:29:47.147902+00:00",
+  "status": "stopped",
+  "auth_mode": "api_key",
+  "targets_info": [],
+  "llm_usage": {
+    "requests": 0,
+    "input_tokens": 0,
+    "input_tokens_details": [
+      {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      }
+    ],
+    "output_tokens": 0,
+    "output_tokens_details": [
+      {
+        "reasoning_tokens": 0
+      }
+    ],
+    "total_tokens": 0,
+    "request_usage_entries": [],
+    "cost": 0.0,
+    "agents": []
+  },
+  "instruction": "",
+  "scan_mode": "deep",
+  "diff_scope": {
+    "active": false
+  },
+  "non_interactive": false,
+  "local_sources": [],
+  "scope_mode": "auto",
+  "diff_base": null
+}

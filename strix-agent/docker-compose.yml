@@ -1,0 +1,97 @@
+# Local integration test harness for the split repos — brings up the
+# backend (this repo), the frontend (../strix-ui), and a gateway in front
+# of both, so you can exercise the real cross-container path instead of
+# just each repo's own unit tests.
+#
+# Frontend and backend sit behind ONE origin (the gateway) rather than two
+# separate host ports — see gateway/nginx.conf for why: some browsers and
+# privacy extensions treat different ports on `localhost` as separate
+# tracking contexts and silently drop the session cookie on fetch/XHR
+# requests between them, even though same-origin-policy itself calls two
+# ports on `localhost` same-site. This mirrors "Option A" from the
+# repo-split plan (docs/saas-architecture.md) — the recommended production
+# topology, not just a local workaround.
+#
+# Assumes strix-agent/ and strix-ui/ are checked out as siblings (as they are
+# today). Run from this directory:
+#   docker compose up --build
+# Everything is on http://localhost:8095 — frontend at /, API at /api/*.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: saas/backend/Dockerfile
+      args:
+        INSTALL_REAL_SCAN: "true"
+    expose:
+      - "8000"
+    environment:
+      SAAS_DEV_MODE: "1"
+      # Local-testing-only values — never reuse these for anything real.
+      # See app/settings.py: refuses to start with SAAS_DEV_MODE=false and
+      # the actual insecure defaults, and warns loudly if dev_mode=true
+      # still has them — setting real-looking values here just keeps the
+      # warning banner out of `docker compose up` output.
+      SAAS_SESSION_SECRET: "local-docker-test-session-secret"
+      SAAS_CREDENTIALS_ENCRYPTION_KEY: "local-docker-test-encryption-key"
+      # Same-origin now (both served via the gateway) — CORS is basically
+      # inert here, but set correctly in case anything calls the backend
+      # directly on its published port during debugging.
+      SAAS_FRONTEND_ORIGIN: "http://localhost:${GATEWAY_PORT:-8095}"
+      SAAS_DATABASE_URL: "sqlite:////data/strix_saas.db"
+      SAAS_ENABLE_REAL_SCAN: "1"
+      STRIX_LLM: "accounts/fireworks/models/kimi-k2p6"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      DOCKER_HOST: "unix:///var/run/docker.sock"
+      # Cloned repos are bind-mounted into the SIBLING sandbox containers
+      # this service spawns via the host Docker socket below. Sibling
+      # bind-mount sources are resolved by the host daemon, so a path under
+      # this container's own /tmp is invisible to it. Mounting a host dir at
+      # the identical path here makes clones visible on both sides — see
+      # strix.interface.utils.clone_repository.
+      STRIX_REPOS_DIR: "/tmp/strix-repos-shared"
+    volumes:
+      - backend-data:/data
+      # Real-scan mode needs the host's Docker socket so the engine can
+      # spawn sandbox containers as siblings of this one.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/strix-repos-shared:/tmp/strix-repos-shared
+      # strix.core.paths.run_dir_for() writes each run's strix.log/run.json
+      # under {cwd}/strix_runs — cwd here is /app/saas/backend (the
+      # Dockerfile's WORKDIR). Without this volume that dir lives only in
+      # the container's writable layer, so recreating the container (any
+      # `--build`/`up` after code changes) silently wipes every completed
+      # run's logs even though the Pentest/Issue rows survive in /data.
+      - backend-runs:/app/saas/backend/strix_runs
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  frontend:
+    build:
+      context: ../strix-ui
+      dockerfile: Dockerfile
+      # No VITE_API_BASE_URL arg — same-origin (default ""), since the
+      # gateway serves both frontend and /api/* from one place.
+    expose:
+      - "80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  gateway:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "${GATEWAY_PORT:-8095}:80"
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  backend-data:
+  backend-runs:
