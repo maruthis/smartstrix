@@ -99,6 +99,31 @@ def test_no_override_renders_builtin_prompt() -> None:
     assert agent.instructions != ""
 
 
+def test_root_agent_omits_hands_on_testing_tools() -> None:
+    """Root orchestrates; filing and proxy schemas stay off its every-turn set."""
+    root = factory.build_strix_agent(is_root=True)
+    child = factory.build_strix_agent(is_root=False)
+    root_names = {t.name for t in root.tools}
+    child_names = {t.name for t in child.tools}
+
+    hands_on = {
+        "create_vulnerability_report",
+        "create_dependency_report",
+        "list_requests",
+        "view_request",
+        "repeat_request",
+        "list_sitemap",
+        "view_sitemap_entry",
+        "scope_rules",
+    }
+    assert hands_on.isdisjoint(root_names)
+    assert hands_on.issubset(child_names)
+    assert "list_reports" in root_names
+    assert "create_agent" in root_names
+    assert "finish_scan" in root_names
+    assert "agent_finish" in child_names
+
+
 def test_respond_to_user_is_interactive_only() -> None:
     """Yielding to the user is meaningless when no user is attached."""
     interactive = factory.build_strix_agent(is_root=True, interactive=True)

@@ -25,7 +25,7 @@ from strix.core.hooks import (
     BudgetPausedError,
     SubagentBudgetReservedError,
 )
-from strix.core.inputs import child_initial_input
+from strix.core.inputs import child_initial_input, collect_child_spawn_brief
 from strix.core.sessions import (
     enforce_image_budget,
     open_agent_session,
@@ -369,6 +369,11 @@ async def spawn_child_agent(
         skills=skills,
     )
 
+    raw_targets = parent_ctx.get("scan_targets")
+    scan_targets = (
+        [t for t in raw_targets if isinstance(t, str)] if isinstance(raw_targets, list) else []
+    )
+
     await _start_child_runner(
         parent_ctx=parent_ctx,
         coordinator=coordinator,
@@ -388,6 +393,7 @@ async def spawn_child_agent(
             parent_id=parent_id,
             task=task,
             parent_history=parent_history,
+            spawn_brief=collect_child_spawn_brief(scan_targets=scan_targets),
         ),
         event_sink=event_sink,
         hooks=hooks,

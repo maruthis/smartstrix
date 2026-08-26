@@ -522,12 +522,13 @@ Default user: pentester (sudo available)
 
 {% if available_skills %}
 <available_skills>
-On-demand specialist skills. Spawn a specialist via `create_agent(skills=[...])`, or pull guidance inline for yourself via `load_skill(skills=[...])`. Anything wrapped in `<specialized_knowledge>` above is already loaded for you.
+On-demand specialist skills, listed by name only. Spawn a specialist via `create_agent(skills=[...])`, or pull the full playbook via `load_skill(skills=[...])`. Skills already inlined under `<specialized_knowledge>` are omitted here.
 
 {% for category, skills in available_skills | dictsort -%}
-{% for skill in skills -%}
-- {{ category }}/{{ skill.name }}{% if skill.description %}: {{ skill.description }}{% endif %}
-{% endfor -%}
-{% endfor -%}
+{%- set remaining = skills | rejectattr("name", "in", loaded_skill_names) | list -%}
+{%- if remaining -%}
+{{ category }}: {{ remaining | map(attribute="name") | join(", ") }}
+{% endif -%}
+{%- endfor -%}
 </available_skills>
 {% endif %}

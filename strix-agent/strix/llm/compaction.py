@@ -98,15 +98,10 @@ You are compacting the earlier part of an autonomous security-testing agent's \
 conversation so it fits the model context window. Produce a dense, factual \
 record that lets the agent continue with no loss of important state.
 
-This is a security engagement: dropped findings mean lost vulnerabilities. Be \
-EXHAUSTIVE, not concise. Enumerate every distinct item as its own bullet — \
-never merge, deduplicate, generalise, or omit distinct findings, credentials, \
-or dead ends, even if they seem minor or repetitive. If the source mentions \
-five vulnerabilities, list five. Copy exact values verbatim: URLs, endpoints, \
-file paths, parameters, payloads, credentials, tokens, keys, hashes, cracked \
-passwords, software versions, and error messages — never paraphrase or \
-placeholder them. Do not invent anything and do not describe this compaction \
-process.
+This is a security engagement: dropped findings mean lost vulnerabilities. \
+Preserve every distinct finding, credential, and dead end with exact values \
+(URLs, payloads, tokens, paths). Compress tool chatter, repeated probes, and \
+narration — do not transcribe every call. Prefer one bullet per distinct item.
 
 Return Markdown with exactly these sections:
 

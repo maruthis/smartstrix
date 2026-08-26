@@ -588,7 +588,10 @@ def _finish_tool_use_behavior(
     return ToolsToFinalOutputResult(is_final_output=False, final_output=None)
 
 
-_BASE_TOOLS: tuple[Tool, ...] = (
+# Orchestration tools every agent needs. Hands-on proxy + filing tools
+# live in ``_TESTING_TOOLS`` and are omitted from the root agent so its
+# per-turn schema stays small — the root delegates probing and filing.
+_COORDINATION_TOOLS: tuple[Tool, ...] = (
     think,
     load_skill,
     create_todo,
@@ -609,22 +612,27 @@ _BASE_TOOLS: tuple[Tool, ...] = (
     save_threat_model,
     amend_threat_model,
     web_search,
-    create_vulnerability_report,
-    create_dependency_report,
     list_reports,
     get_report,
-    list_requests,
-    view_request,
-    repeat_request,
-    list_sitemap,
-    view_sitemap_entry,
-    scope_rules,
     view_agent_graph,
     send_message_to_agent,
     wait_for_agents,
     create_agent,
     stop_agent,
 )
+
+_TESTING_TOOLS: tuple[Tool, ...] = (
+    create_vulnerability_report,
+    create_dependency_report,
+    list_requests,
+    view_request,
+    repeat_request,
+    list_sitemap,
+    view_sitemap_entry,
+    scope_rules,
+)
+
+_BASE_TOOLS: tuple[Tool, ...] = (*_COORDINATION_TOOLS, *_TESTING_TOOLS)
 
 
 # Extra tools registered for scan agents. Mirrors
@@ -714,9 +722,9 @@ def build_strix_agent(
         # Yielding to the user is only meaningful when one is attached.
         agent_tools.append(respond_to_user)
     if is_root:
-        tools: list[Tool] = [*_BASE_TOOLS, *agent_tools, finish_scan]
+        tools: list[Tool] = [*_COORDINATION_TOOLS, *agent_tools, finish_scan]
     else:
-        tools = [*_BASE_TOOLS, *agent_tools, agent_finish]
+        tools = [*_COORDINATION_TOOLS, *_TESTING_TOOLS, *agent_tools, agent_finish]
     _ensure_unique_tool_names(tools)
     tools = [
         _with_bounded_result(_with_strictness(_with_coerced_arguments(tool), strict_tool_schemas))

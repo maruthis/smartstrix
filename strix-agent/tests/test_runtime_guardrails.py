@@ -80,6 +80,45 @@ async def test_spawn_child_agent_enforces_depth_limit(monkeypatch, tmp_path: Pat
     assert "depth limit" in result["error"]
 
 
+@pytest.mark.asyncio
+async def test_spawn_child_agent_injects_scan_brief(monkeypatch, tmp_path: Path):
+    captured: dict = {}
+
+    async def capture(**kwargs):
+        captured.update(kwargs)
+
+    coordinator = AgentCoordinator()
+    await coordinator.register("root", "Root", parent_id=None)
+    monkeypatch.setattr(
+        execution,
+        "load_settings",
+        lambda: SimpleNamespace(runtime=SimpleNamespace(max_child_agents=12, max_agent_depth=3)),
+    )
+    monkeypatch.setattr(execution, "_start_child_runner", capture)
+
+    result = await execution.spawn_child_agent(
+        coordinator=coordinator,
+        factory=_factory,
+        agents_db_path=tmp_path / "agents.db",
+        sessions_to_close=[],
+        run_config=object(),
+        max_turns=1,
+        interactive=False,
+        parent_ctx={"agent_id": "root", "scan_targets": ["https://app.example"]},
+        name="Child",
+        task="Audit the login flow.",
+        skills=[],
+        parent_history=[],
+    )
+
+    assert result["success"] is True
+    content = captured["initial_input"][0]["content"]
+    assert "Scan brief" in content
+    assert "https://app.example" in content
+    assert "Audit the login flow." in content
+    assert content.index("Scan brief") < content.index("Audit the login flow.")
+
+
 def test_docker_resource_limits_default_on(monkeypatch):
     for key in (
         "STRIX_SANDBOX_MEM_LIMIT",

@@ -416,7 +416,7 @@ async def create_agent(
     ctx: RunContextWrapper,
     name: str,
     task: str,
-    inherit_context: bool = True,
+    inherit_context: bool = False,
     skills: list[str] | None = None,
 ) -> str:
     """Spawn a specialist child agent to run in parallel.
@@ -452,15 +452,15 @@ async def create_agent(
         name: Human-readable child name (used in graph views and
             ``send_message_to_agent`` flows).
         task: Specific objective. Be concrete — what to test, what
-            success looks like, any constraints. Name the target the
-            child should call ``get_threat_model`` on, and any shared
-            state it should build on rather than rediscover — what
-            recon already mapped, which surfaces are already covered,
-            which coverage entry it is picking up. A child that is not
-            told what is already known repeats it.
-        inherit_context: Default ``True``. The child receives the
-            parent's input history as background; only set ``False``
-            when starting a clean-slate task.
+            success looks like, any constraints. A scan brief with
+            authorized targets, shared notes, open coverage, and
+            already-filed findings is injected automatically; still
+            name anything this child uniquely needs that is not in
+            those shared stores.
+        inherit_context: Default ``False``. The injected scan brief
+            plus this ``task`` are usually enough. Set ``True`` only
+            when the child genuinely needs a slice of the parent's
+            recent history (still capped).
         skills: List of skill names (e.g. ``["xss", "sql_injection"]``).
             Max 5; prefer 1-3.
     """

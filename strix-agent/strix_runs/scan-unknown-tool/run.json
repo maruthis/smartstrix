@@ -2,7 +2,7 @@
   "run_id": "scan-unknown-tool",
   "run_name": "scan-unknown-tool",
   "start_time": "2026-08-26T06:55:57.106229+00:00",
-  "end_time": "2026-08-26T09:29:47.160250+00:00",
+  "end_time": "2026-08-26T11:30:33.438108+00:00",
   "status": "stopped",
   "auth_mode": "api_key",
   "targets_info": [],

@@ -1,5 +1,5 @@
 # Local integration test harness for the split repos — brings up the
-# backend (this repo), the frontend (../strix-ui), and a gateway in front
+# backend (this repo), the frontend (../strixui), and a gateway in front
 # of both, so you can exercise the real cross-container path instead of
 # just each repo's own unit tests.
 #
@@ -12,7 +12,7 @@
 # repo-split plan (docs/saas-architecture.md) — the recommended production
 # topology, not just a local workaround.
 #
-# Assumes strix-agent/ and strix-ui/ are checked out as siblings (as they are
+# Assumes strix-1/ and strixui/ are checked out as siblings (as they are
 # today). Run from this directory:
 #   docker compose up --build
 # Everything is on http://localhost:8095 — frontend at /, API at /api/*.
@@ -72,7 +72,7 @@ services:
 
   frontend:
     build:
-      context: ../strix-ui
+      context: ../strixui
       dockerfile: Dockerfile
       # No VITE_API_BASE_URL arg — same-origin (default ""), since the
       # gateway serves both frontend and /api/* from one place.

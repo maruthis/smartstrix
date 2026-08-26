@@ -100,6 +100,24 @@ def test_outcome_counts_and_filtering() -> None:
     by_surface = _list_impl(outcome=None, surface="sea", caller_agent_id=None)
     assert by_surface["filtered_count"] == 1
     assert by_surface["entries"][0]["surface"] == "/search"
+    assert by_surface["returned_count"] == 1
+    assert by_surface["truncated"] is False
+
+
+def test_list_pages_when_more_rows_than_the_limit() -> None:
+    for i in range(55):
+        _record(surface=f"/ep-{i}", risk_area="injection")
+
+    first = _list_impl(outcome=None, surface=None, caller_agent_id=None, limit=50, offset=0)
+    assert first["filtered_count"] == 55
+    assert first["returned_count"] == 50
+    assert first["truncated"] is True
+    assert first["offset"] == 0
+
+    rest = _list_impl(outcome=None, surface=None, caller_agent_id=None, limit=50, offset=50)
+    assert rest["returned_count"] == 5
+    assert rest["truncated"] is False
+    assert rest["offset"] == 50
 
 
 def test_list_rejects_unknown_outcome_filter() -> None:

@@ -36,6 +36,7 @@ _coverage_lock = threading.RLock()
 _coverage_path: Path | None = None
 _ENTRY_ID_GENERATION_ATTEMPTS = 1024
 _EVIDENCE_PREVIEW_CHARS = 240
+_DEFAULT_LIST_LIMIT = 50
 
 VALID_OUTCOMES: tuple[str, ...] = (
     "reported",
@@ -324,7 +325,12 @@ def _update_impl(
 
 
 def _list_impl(
-    *, outcome: str | None, surface: str | None, caller_agent_id: str | None
+    *,
+    outcome: str | None,
+    surface: str | None,
+    caller_agent_id: str | None,
+    limit: int = _DEFAULT_LIST_LIMIT,
+    offset: int = 0,
 ) -> dict[str, Any]:
     normalized_outcome: str | None = None
     if outcome and outcome.strip():
@@ -365,10 +371,16 @@ def _list_impl(
             listing["by_you"] = True
         entries.append(listing)
 
+    safe_offset = max(offset, 0)
+    safe_limit = max(limit, 1)
+    page = entries[safe_offset : safe_offset + safe_limit]
     return {
         "success": True,
-        "entries": entries,
+        "entries": page,
         "filtered_count": len(entries),
+        "returned_count": len(page),
+        "offset": safe_offset,
+        "truncated": safe_offset + len(page) < len(entries),
         "total_count": len(_coverage_storage),
         "outcome_counts": outcome_counts(),
     }
@@ -508,6 +520,8 @@ async def list_coverage(
     ctx: RunContextWrapper,
     outcome: str | None = None,
     surface: str | None = None,
+    limit: int = _DEFAULT_LIST_LIMIT,
+    offset: int = 0,
 ) -> str:
     """List coverage entries recorded so far in this scan.
 
@@ -516,9 +530,11 @@ async def list_coverage(
     unresolved ``needs_follow_up`` rows into the final report. Leaf
     agents should record their own coverage and get on with testing.
 
-    Returns each entry with its ``surface``, ``risk_area``, ``outcome``,
-    evidence preview, and the agent that recorded it, plus
-    ``outcome_counts`` across the whole scan.
+    Returns a page of entries with ``surface``, ``risk_area``,
+    ``outcome``, evidence preview, and the agent that recorded it, plus
+    ``outcome_counts`` across the whole scan. Default page size is 50;
+    pass ``offset`` to walk the rest. ``truncated`` is true when more
+    rows remain.
 
     Args:
         outcome: Optional filter — one of ``reported`` /
@@ -527,9 +543,16 @@ async def list_coverage(
             finishing the scan to see what is still open.
         surface: Optional case-insensitive substring filter on the
             surface name.
+        limit: Max rows to return (default 50).
+        offset: Skip this many matching rows (for paging).
     """
     caller_agent_id, _ = _caller_identity(ctx)
     result = await asyncio.to_thread(
-        _list_impl, outcome=outcome, surface=surface, caller_agent_id=caller_agent_id
+        _list_impl,
+        outcome=outcome,
+        surface=surface,
+        caller_agent_id=caller_agent_id,
+        limit=limit,
+        offset=offset,
     )
     return json.dumps(result, ensure_ascii=False, default=str)

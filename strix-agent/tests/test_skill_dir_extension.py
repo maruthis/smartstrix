@@ -163,10 +163,12 @@ def test_malformed_frontmatter_keeps_skill_body(tmp_path: Path) -> None:
     assert load_skills(["extra/broken"]) == {"broken": "broken body"}
 
 
-def test_system_prompt_renders_skill_descriptions() -> None:
+def test_system_prompt_renders_skill_names_without_descriptions() -> None:
     prompt = render_system_prompt(scan_mode="quick", is_root=True)
 
-    assert "- technologies/firebase: Firebase security testing covering" in prompt
+    assert "technologies: " in prompt
+    assert "firebase" in prompt
+    assert "Firebase security testing covering" not in prompt
 
 
 def test_system_prompt_omits_empty_skill_description(tmp_path: Path) -> None:
@@ -175,7 +177,7 @@ def test_system_prompt_omits_empty_skill_description(tmp_path: Path) -> None:
 
     prompt = render_system_prompt(scan_mode="quick", is_root=True)
 
-    assert "- extra/widget\n" in prompt
+    assert "extra: widget" in prompt
     assert "- extra/widget: " not in prompt
 
 
@@ -285,6 +287,18 @@ def test_resolve_skills_always_includes_analysis_baseline() -> None:
     assert "analysis/severity_calibration" in resolved
 
 
+def test_resolve_skills_skips_tester_playbooks_on_the_root_agent() -> None:
+    root = _resolve_skills(requested=None, is_root=True)
+
+    assert "coordination/root_agent" in root
+    assert "tooling/agent_browser" not in root
+    assert "tooling/python" not in root
+    assert "analysis/counterevidence" not in root
+    child = _resolve_skills(requested=None, is_root=False)
+    assert "tooling/agent_browser" in child
+    assert "coordination/root_agent" not in child
+
+
 def test_resolve_skills_adds_diff_mode_only_when_diff_scoped() -> None:
     assert "scan_modes/diff" not in _resolve_skills(requested=None)
     diff_scoped = _resolve_skills(requested=None, is_diff_scoped=True)
@@ -301,6 +315,11 @@ def test_resolve_skills_gates_source_aware_skills_on_whitebox() -> None:
     whitebox = _resolve_skills(requested=None, is_whitebox=True)
     assert "analysis/fix_verification" in whitebox
     assert "analysis/source_aware_discovery" in whitebox
+
+    whitebox_root = _resolve_skills(requested=None, is_whitebox=True, is_root=True)
+    assert "coordination/source_aware_whitebox" in whitebox_root
+    assert "analysis/fix_verification" not in whitebox_root
+    assert "analysis/source_aware_discovery" not in whitebox_root
 
 
 def test_new_skill_files_load() -> None:

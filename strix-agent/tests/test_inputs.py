@@ -3,18 +3,27 @@
 from __future__ import annotations
 
 from itertools import pairwise
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import litellm
 import pytest
 
+import strix.tools.notes.tools as notes_tools
 from strix.core.inputs import (
     build_root_task,
     build_scan_targets,
     build_scope_context,
     child_initial_input,
+    collect_child_spawn_brief,
+    format_child_spawn_brief,
     make_model_settings,
 )
+from strix.tools.coverage.tools import _record_impl, hydrate_coverage_from_disk
+from strix.tools.notes.tools import _create_note_impl, _notes_lock, _notes_storage
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _child_kwargs(parent_history: list[Any]) -> dict[str, Any]:
@@ -49,6 +58,119 @@ def test_child_initial_input_single_message_with_history() -> None:
     assert "previous work" in content
     assert "agent scout (agent-2)" in content
     assert "Audit the login flow." in content
+
+
+def test_child_initial_input_truncates_oversized_parent_history() -> None:
+    history = [{"role": "assistant", "content": "x" * 20_000}]
+    result = child_initial_input(**_child_kwargs(history))
+
+    content = result[0]["content"]
+    assert "inherited context truncated" in content
+    assert "x" * 20_000 not in content
+    assert "Audit the login flow." in content
+
+
+def test_child_initial_input_injects_spawn_brief_before_the_task() -> None:
+    brief = format_child_spawn_brief(
+        targets=["https://app.example"],
+        notes=[],
+        open_coverage=[],
+        coverage_counts={},
+    )
+    result = child_initial_input(**_child_kwargs([]), spawn_brief=brief)
+    content = result[0]["content"]
+
+    assert "https://app.example" in content
+    assert content.index("Scan brief") < content.index("Audit the login flow.")
+    assert "Inherited context" not in content
+
+
+def test_format_child_spawn_brief_lists_open_coverage_and_notes() -> None:
+    brief = format_child_spawn_brief(
+        targets=["https://app.example"],
+        notes=[
+            {
+                "note_id": "abc123",
+                "title": "Staging creds",
+                "content_preview": "admin:admin on /login",
+            }
+        ],
+        open_coverage=[
+            {
+                "entry_id": "cov-1",
+                "surface": "POST /login",
+                "risk_area": "SQL injection",
+                "outcome": "needs_follow_up",
+                "evidence": "Need a valid session cookie.",
+            }
+        ],
+        coverage_counts={"needs_follow_up": 1, "no_issue_found": 2},
+        closed_coverage=[
+            {
+                "surface": "GET /health",
+                "risk_area": "injection",
+                "outcome": "no_issue_found",
+            }
+        ],
+        findings=[{"id": "vuln-0001", "title": "IDOR on /orders", "severity": "high"}],
+    )
+
+    assert "- https://app.example" in brief
+    assert "[abc123] Staging creds: admin:admin on /login" in brief
+    assert "[cov-1] POST /login (SQL injection): Need a valid session cookie." in brief
+    assert "needs_follow_up=1" in brief
+    assert "GET /health (injection): no_issue_found" in brief
+    assert "[vuln-0001] HIGH IDOR on /orders" in brief
+    assert "update_coverage" in brief
+
+
+def test_collect_child_spawn_brief_reads_shared_stores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hydrate_coverage_from_disk(tmp_path)
+    monkeypatch.setattr(notes_tools, "_notes_path", None)
+    with _notes_lock:
+        _notes_storage.clear()
+
+    assert _create_note_impl("Staging creds", "admin:admin on /login")["success"] is True
+    recorded = _record_impl(
+        surface="POST /login",
+        risk_area="SQL injection",
+        outcome="needs_follow_up",
+        evidence="Need a valid session cookie.",
+        agent_id="agent-1",
+        agent_name="recon",
+    )
+    assert recorded["success"] is True
+
+    brief = collect_child_spawn_brief(scan_targets=["https://app.example"])
+
+    assert "https://app.example" in brief
+    assert "Staging creds" in brief
+    assert "admin:admin" in brief
+    assert "POST /login" in brief
+    assert "SQL injection" in brief
+
+
+def test_format_child_spawn_brief_truncates_when_oversized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("strix.core.inputs._MAX_SPAWN_BRIEF_CHARS", 800)
+    brief = format_child_spawn_brief(
+        targets=["https://app.example"],
+        notes=[
+            {
+                "note_id": f"n{i}",
+                "title": f"Note {i}",
+                "content_preview": "x" * 400,
+            }
+            for i in range(40)
+        ],
+        open_coverage=[],
+        coverage_counts={},
+    )
+    assert "scan brief truncated" in brief
+    assert brief.startswith("== Scan brief")
 
 
 @pytest.mark.parametrize(
@@ -152,7 +274,10 @@ def test_max_reasoning_effort_sent_as_raw_body_field() -> None:
     )
     assert settings.reasoning is None
     assert settings.extra_args == {"timeout": 30}
-    assert settings.extra_body == {"allowed_openai_params": ["parallel_tool_calls"], "reasoning_effort": "max"}
+    assert settings.extra_body == {
+        "allowed_openai_params": ["parallel_tool_calls"],
+        "reasoning_effort": "max",
+    }
 
 
 def test_conversation_tail_breakpoint_moves_with_appended_transcript() -> None:

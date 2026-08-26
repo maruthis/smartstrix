@@ -2,7 +2,7 @@
   "run_id": "scan-default",
   "run_name": "scan-default",
   "start_time": "2026-08-26T06:55:57.101733+00:00",
-  "end_time": "2026-08-26T09:29:47.147902+00:00",
+  "end_time": "2026-08-26T11:30:33.425869+00:00",
   "status": "stopped",
   "auth_mode": "api_key",
   "targets_info": [],

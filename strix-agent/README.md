@@ -77,7 +77,7 @@ strix --target ./app-directory
 Want the multi-tenant dashboard (org accounts, connected repos/domains,
 scheduled scans, PR reviews, Chat) instead of the bare CLI? The backend
 (this repo, `saas/backend/`) and the frontend now live in **separate
-repos** — check out [`strix-ui`](https://github.com/maruthis/smartstrix/strix-ui) as a
+repos** — check out [`strixui`](https://github.com/maruthis/strixui) as a
 sibling directory next to this one, then bring the whole stack up (backend
 + frontend + a gateway serving both from one origin) with:
 
@@ -402,12 +402,12 @@ setup-dev` also installs the pre-commit hooks. See
 [`docs/strix-engine-architecture.md`](docs/strix-engine-architecture.md)
 for how the engine itself is structured.
 
-### SaaS dashboard (backend here, frontend in `strix-ui`)
+### SaaS dashboard (backend here, frontend in `strixui`)
 
 The frontend has moved out of this repo into its own sibling repo,
-[`strix-ui`](https://github.com/maruthis/smartstrix/strix-ui) — this repo now holds only
+[`strixui`](https://github.com/maruthis/strixui) — this repo now holds only
 the backend (`saas/backend/`) plus the `strix` engine it calls into. Check
-out `strix-ui` next to this repo (`docker-compose.yml` at the repo root
+out `strixui` next to this repo (`docker-compose.yml` at the repo root
 assumes that layout), then bring the whole stack up together:
 
 ```bash
@@ -418,7 +418,7 @@ What it does (see the compose file's own comments for the full detail):
 
 - Builds and starts three containers behind one gateway on
   `http://localhost:8095`: the FastAPI **backend**, the **frontend** (built
-  from `../strix-ui`), and an nginx **gateway** that serves both from a
+  from `../strixui`), and an nginx **gateway** that serves both from a
   single origin (frontend at `/`, API at `/api/*` — deliberately *not* two
   separate host ports, since some browsers/privacy extensions treat
   different `localhost` ports as separate tracking contexts and drop the
@@ -432,7 +432,7 @@ What it does (see the compose file's own comments for the full detail):
   up its own sandbox container as a sibling of the backend one.
 
 For running the backend on its own (e.g. against the CLI-style workflow, or
-while iterating on `strix-ui` separately with its own dev server), see
+while iterating on `strixui` separately with its own dev server), see
 [`saas/README.md`](saas/README.md) and [`saas/CONFIG.md`](saas/CONFIG.md)
 for prerequisites, environment variables, and the backend test suite.
 [`docs/saas-architecture.md`](docs/saas-architecture.md) covers how the

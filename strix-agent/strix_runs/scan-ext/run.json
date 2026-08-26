@@ -2,7 +2,7 @@
   "run_id": "scan-ext",
   "run_name": "scan-ext",
   "start_time": "2026-08-26T06:55:57.073122+00:00",
-  "end_time": "2026-08-26T09:29:47.120806+00:00",
+  "end_time": "2026-08-26T11:30:33.398256+00:00",
   "status": "stopped",
   "auth_mode": "api_key",
   "targets_info": [],

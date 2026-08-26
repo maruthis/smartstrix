@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING, Any
 
 from agents.model_settings import ModelSettings
@@ -20,6 +21,11 @@ from strix.config.models import (
     request_timeout_extra_args,
 )
 from strix.core.sessions import scrub_images_from_items
+from strix.tools.coverage.tools import get_coverage_entries, outcome_counts
+from strix.tools.notes.tools import _list_notes_impl
+
+
+logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -277,7 +283,9 @@ def make_model_settings(
         # this specific param through for this request rather than
         # rejecting it — see https://docs.litellm.ai/docs/completion/drop_params.
         # No effect on providers that already accept the param.
-        extra_body = _merge_extra_body(extra_body, {"allowed_openai_params": ["parallel_tool_calls"]})
+        extra_body = _merge_extra_body(
+            extra_body, {"allowed_openai_params": ["parallel_tool_calls"]}
+        )
     model_settings = ModelSettings(
         parallel_tool_calls=False if has_tools else None,
         retry=DEFAULT_MODEL_RETRY,
@@ -355,6 +363,207 @@ def _prompt_cache_extra_args(model_name: str) -> dict[str, Any] | None:
     return {"cache_control_injection_points": points}
 
 
+_MAX_INHERITED_CONTEXT_CHARS = 8_000
+_MAX_SPAWN_BRIEF_CHARS = 4_000
+_MAX_BRIEF_NOTES = 12
+_MAX_BRIEF_OPEN_COVERAGE = 20
+_MAX_BRIEF_CLOSED_COVERAGE = 8
+_MAX_BRIEF_FINDINGS = 12
+_BRIEF_PREVIEW_CHARS = 200
+
+
+def _clip_brief_text(text: str, limit: int = _BRIEF_PREVIEW_CHARS) -> str:
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 3].rstrip() + "..."
+
+
+def _brief_target_lines(targets: list[str]) -> list[str]:
+    if not targets:
+        return ["Targets:", "- (none listed; use the task and get_threat_model)"]
+    return ["Targets:", *[f"- {target}" for target in targets]]
+
+
+def _brief_note_lines(notes: list[dict[str, Any]]) -> list[str]:
+    if not notes:
+        return ["Notes: (none yet)"]
+    extra = f" ({len(notes)} total; showing up to {_MAX_BRIEF_NOTES})"
+    lines = [f"Notes{extra}:"]
+    for note in notes[:_MAX_BRIEF_NOTES]:
+        note_id = str(note.get("note_id") or "")
+        title = str(note.get("title") or "untitled")
+        preview = str(note.get("content_preview") or note.get("content") or "")
+        prefix = f"- [{note_id}] {title}" if note_id else f"- {title}"
+        clipped = _clip_brief_text(preview) if preview else ""
+        lines.append(f"{prefix}: {clipped}" if clipped else prefix)
+    return lines
+
+
+def _brief_open_coverage_lines(entries: list[dict[str, Any]]) -> list[str]:
+    if not entries:
+        return ["Open coverage: (none)"]
+    extra = (
+        f" ({len(entries)} open; showing up to {_MAX_BRIEF_OPEN_COVERAGE})"
+        if len(entries) > _MAX_BRIEF_OPEN_COVERAGE
+        else ""
+    )
+    lines = [f"Open coverage (needs_follow_up){extra}:"]
+    for entry in entries[:_MAX_BRIEF_OPEN_COVERAGE]:
+        entry_id = str(entry.get("entry_id") or "")
+        surface = str(entry.get("surface") or "")
+        risk = str(entry.get("risk_area") or "")
+        evidence = _clip_brief_text(str(entry.get("evidence") or ""))
+        head = f"- [{entry_id}] {surface}" if entry_id else f"- {surface}"
+        if risk:
+            head = f"{head} ({risk})"
+        lines.append(f"{head}: {evidence}" if evidence else head)
+    return lines
+
+
+def _brief_closed_coverage_lines(entries: list[dict[str, Any]]) -> list[str]:
+    if not entries:
+        return []
+    lines = ["Already assessed (do not re-record; update_coverage if you disagree):"]
+    for entry in entries[:_MAX_BRIEF_CLOSED_COVERAGE]:
+        surface = str(entry.get("surface") or "")
+        risk = str(entry.get("risk_area") or "")
+        outcome = str(entry.get("outcome") or "")
+        detail = f"{surface} ({risk})" if risk else surface
+        lines.append(f"- {detail}: {outcome}")
+    return lines
+
+
+def _brief_finding_lines(findings: list[dict[str, Any]]) -> list[str]:
+    if not findings:
+        return ["Filed findings: (none yet)"]
+    extra = (
+        f" ({len(findings)} total; showing up to {_MAX_BRIEF_FINDINGS})"
+        if len(findings) > _MAX_BRIEF_FINDINGS
+        else ""
+    )
+    lines = [f"Filed findings{extra}:"]
+    for report in findings[:_MAX_BRIEF_FINDINGS]:
+        report_id = str(report.get("id") or "")
+        severity = str(report.get("severity") or "").upper()
+        title = str(report.get("title") or "untitled")
+        label = f"- [{report_id}]" if report_id else "-"
+        if severity:
+            label = f"{label} {severity}"
+        lines.append(f"{label} {title}")
+    return lines
+
+
+def format_child_spawn_brief(
+    *,
+    targets: list[str],
+    notes: list[dict[str, Any]],
+    open_coverage: list[dict[str, Any]],
+    coverage_counts: dict[str, int],
+    closed_coverage: list[dict[str, Any]] | None = None,
+    findings: list[dict[str, Any]] | None = None,
+) -> str:
+    """Render the structured brief injected into every child's first message.
+
+    This is the safety net for ``inherit_context=False``: the child still sees
+    authorized targets, shared notes (credentials, inventories), open coverage
+    rows it may be picking up, and findings already filed — without the
+    parent's full turn history.
+    """
+    count_bits = [f"{outcome}={count}" for outcome, count in coverage_counts.items() if count]
+    coverage_summary = (
+        "Coverage so far: " + (", ".join(count_bits) if count_bits else "(none recorded)")
+    )
+    rendered = "\n".join(
+        [
+            "== Scan brief (injected; do not rediscover this) ==",
+            "Use this as established scan state. Call get_threat_model, "
+            "list_notes, list_coverage, and get_note for anything not listed. "
+            "Do not re-file a finding already listed below. If your task "
+            "picks up an open coverage row, call update_coverage on that id "
+            "instead of recording a second row.",
+            "",
+            *_brief_target_lines(targets),
+            "",
+            *_brief_note_lines(notes),
+            "",
+            coverage_summary,
+            *_brief_open_coverage_lines(open_coverage),
+            *_brief_closed_coverage_lines(list(closed_coverage or [])),
+            "",
+            *_brief_finding_lines(list(findings or [])),
+            "== End scan brief ==",
+        ]
+    )
+    if len(rendered) <= _MAX_SPAWN_BRIEF_CHARS:
+        return rendered
+    return (
+        rendered[:_MAX_SPAWN_BRIEF_CHARS]
+        + "\n[... scan brief truncated; use list_notes / list_coverage / "
+        "list_reports for the rest ...]"
+    )
+
+
+def _snapshot_notes() -> list[dict[str, Any]]:
+    try:
+        listed = _list_notes_impl()
+        if listed.get("success"):
+            return [n for n in listed.get("notes", []) if isinstance(n, dict)]
+    except Exception:
+        logger.exception("collect_child_spawn_brief: notes snapshot failed")
+    return []
+
+
+def _snapshot_coverage() -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+    try:
+        open_coverage: list[dict[str, Any]] = []
+        closed_coverage: list[dict[str, Any]] = []
+        for entry in get_coverage_entries():
+            if entry.get("outcome") == "needs_follow_up":
+                open_coverage.append(entry)
+            else:
+                closed_coverage.append(entry)
+        return open_coverage, closed_coverage, outcome_counts()
+    except Exception:
+        logger.exception("collect_child_spawn_brief: coverage snapshot failed")
+        return [], [], {}
+
+
+def _snapshot_findings() -> list[dict[str, Any]]:
+    try:
+        from strix.report.state import get_global_report_state  # noqa: PLC0415
+
+        state = get_global_report_state()
+        if state is None:
+            return []
+        return [
+            {
+                "id": report.get("id"),
+                "title": report.get("title"),
+                "severity": report.get("severity"),
+            }
+            for report in state.get_existing_vulnerabilities()
+            if isinstance(report, dict)
+        ]
+    except Exception:
+        logger.exception("collect_child_spawn_brief: findings snapshot failed")
+        return []
+
+
+def collect_child_spawn_brief(*, scan_targets: list[str] | None = None) -> str:
+    """Snapshot shared scan state for a newly spawned child."""
+    targets = [t.strip() for t in (scan_targets or []) if isinstance(t, str) and t.strip()]
+    open_coverage, closed_coverage, coverage_counts = _snapshot_coverage()
+    return format_child_spawn_brief(
+        targets=targets,
+        notes=_snapshot_notes(),
+        open_coverage=open_coverage,
+        coverage_counts=coverage_counts,
+        closed_coverage=closed_coverage,
+        findings=_snapshot_findings(),
+    )
+
+
 def child_initial_input(
     *,
     name: str,
@@ -362,6 +571,7 @@ def child_initial_input(
     parent_id: str,
     task: str,
     parent_history: list[Any],
+    spawn_brief: str = "",
 ) -> list[dict[str, Any]]:
     """Build the initial input for a child agent as a single user message.
 
@@ -377,6 +587,12 @@ def child_initial_input(
             ensure_ascii=False,
             default=str,
         )
+        if len(rendered) > _MAX_INHERITED_CONTEXT_CHARS:
+            rendered = (
+                rendered[:_MAX_INHERITED_CONTEXT_CHARS]
+                + "\n[... inherited context truncated; rely on the task "
+                "and shared notes/coverage for the rest ...]"
+            )
         parts.append(
             "== Inherited context from parent (background only) ==\n"
             f"{rendered}\n"
@@ -389,5 +605,7 @@ def child_initial_input(
         "Maintain your own identity. Call agent_finish when your task "
         "is complete.",
     )
+    if spawn_brief.strip():
+        parts.append(spawn_brief.strip())
     parts.append(task)
     return [{"role": "user", "content": "\n\n".join(parts)}]

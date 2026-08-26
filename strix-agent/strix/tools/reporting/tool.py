@@ -632,25 +632,6 @@ async def create_vulnerability_report(
     broad/parent CWEs like CWE-74, CWE-20, CWE-200, CWE-284, or
     CWE-693.
 
-    Common CWE references (use the ID only — names are listed here
-    just for your lookup):
-
-    - **Injection**: CWE-79 XSS, CWE-89 SQLi, CWE-78 OS Command
-      Injection, CWE-94 Code Injection, CWE-77 Command Injection.
-    - **Auth / Access**: CWE-287 Improper Authentication, CWE-862
-      Missing Authorization, CWE-863 Incorrect Authorization, CWE-306
-      Missing Auth for Critical Function, CWE-639 Authz Bypass via
-      User-Controlled Key.
-    - **Web**: CWE-352 CSRF, CWE-918 SSRF, CWE-601 Open Redirect,
-      CWE-434 Unrestricted File Upload.
-    - **Memory**: CWE-787 OOB Write, CWE-125 OOB Read, CWE-416 UAF,
-      CWE-120 Classic Buffer Overflow.
-    - **Data**: CWE-502 Deserialization of Untrusted Data, CWE-22
-      Path Traversal, CWE-611 XXE.
-    - **Crypto / Config**: CWE-798 Hard-coded Credentials, CWE-327
-      Broken / Risky Crypto, CWE-311 Missing Encryption, CWE-916 Weak
-      Password Hashing.
-
     Args:
         title: Specific finding title (e.g.
             ``"SQL Injection in /api/users login parameter"``). Don't

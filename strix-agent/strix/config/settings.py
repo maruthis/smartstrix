@@ -93,7 +93,7 @@ class ContextSettings(BaseSettings):
     fallback_context_tokens: int = Field(
         default=200_000, gt=0, alias="STRIX_CONTEXT_FALLBACK_TOKENS"
     )
-    summary_max_tokens: int = Field(default=4_096, gt=0, alias="STRIX_CONTEXT_SUMMARY_TOKENS")
+    summary_max_tokens: int = Field(default=2_048, gt=0, alias="STRIX_CONTEXT_SUMMARY_TOKENS")
     tool_output_max_tokens: int = Field(default=8_000, gt=0, alias="STRIX_TOOL_OUTPUT_MAX_TOKENS")
     tool_output_max_lines: int = Field(default=2_000, gt=0, alias="STRIX_TOOL_OUTPUT_MAX_LINES")
     # Floor above the truncation-notice size so a preview always fits.

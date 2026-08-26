@@ -96,7 +96,7 @@ def _find_run_dir(scan_id: str) -> Path:
         repo_root / RUNS_DIR_NAME / scan_id,
     ]
     # Local development often has multiple Strix checkouts under the same
-    # workspace (e.g. strix, strix-agent). If the worker was started from a
+    # workspace (e.g. strix, strix-1). If the worker was started from a
     # sibling checkout but the API route is served from this one, still find
     # the durable run artifact by scan id.
     for sibling_backend in workspace_root.glob("*/saas/backend"):
