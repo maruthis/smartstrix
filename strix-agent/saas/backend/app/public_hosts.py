@@ -95,6 +95,50 @@ def assert_public_https_url(url: str) -> str:
     return url.strip()
 
 
+def live_https_url(hostname: str) -> str:
+    """Build a reachable https URL from a stored domain hostname.
+
+    ``Domain.hostname`` is normally a bare host. Legacy rows and pasted
+    values may already include a scheme and/or path; prefixing ``https://``
+    again produces ``https://https://...``, which is not a live target.
+    Path is preserved when present so an API base such as
+    ``https://api.example.com/v1`` stays a specific live surface.
+    """
+    value = (hostname or "").strip()
+    if not value:
+        raise ValueError("empty hostname")
+
+    lowered = value.lower()
+    while lowered.startswith("https://https://") or lowered.startswith("https://http://"):
+        value = value.split("://", 1)[1]
+        lowered = value.lower()
+    if lowered.startswith("http://"):
+        value = "https://" + value[len("http://") :]
+        lowered = value.lower()
+
+    if "://" in value:
+        parsed = urlparse(value)
+        host = parsed.hostname
+        if not host:
+            raise ValueError("invalid hostname")
+        path = parsed.path.rstrip("/") if parsed.path and parsed.path != "/" else ""
+        return f"https://{host}{path}"
+
+    host_part, sep, rest = value.partition("/")
+    host = host_part.split("?", 1)[0].split("#", 1)[0]
+    if host.count(":") == 1:
+        maybe_host, port = host.rsplit(":", 1)
+        if port.isdigit():
+            host = maybe_host
+    path = f"/{rest}" if sep else ""
+    path = path.split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    if path == "/":
+        path = ""
+    if not host:
+        raise ValueError("invalid hostname")
+    return f"https://{host}{path}"
+
+
 def hostname_resolves_public(hostname: str) -> bool:
     try:
         infos = socket.getaddrinfo(hostname, None)

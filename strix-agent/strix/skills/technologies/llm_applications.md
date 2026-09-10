@@ -100,7 +100,7 @@ Distinguish:
 
 ## LLM02:2026 Sensitive Information Disclosure
 
-Inventory sensitive data in prompts, reasoning or scratchpad traces, retrieved chunks, tool results, memory, caches, logs, training/feedback stores, model outputs, and provider retention paths.
+Inventory sensitive data in prompts, reasoning or scratchpad traces, retrieved chunks, tool results, memory, caches, logs, training/feedback stores, model outputs, and provider retention paths. Load `ai_ml_governance` for model pinning, `store=`/training flags, prompt telemetry, and guardrails that fail open — those are LLM02/governance findings, not optional hardening.
 
 Test separately for:
 

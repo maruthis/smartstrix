@@ -32,6 +32,7 @@ Crypto failures leak or forge data when the app uses broken algorithms, custom c
 - Confirm HSTS is actually sent and covers subdomains when the app uses them
 - Hit the same host on `:80` and look for open redirects or cookie issuance over HTTP
 - Cloud/CDN: origin still speaking HTTP behind TLS at the edge is a finding only if you can reach the origin
+- **Whitebox (mandatory when source is present):** grep `ssl=False`, `verify=False`, `ssl.CERT_NONE`, `insecure_skip_verify`, `NODE_TLS_REJECT_UNAUTHORIZED`. A hardcoded disable in the HTTP client is a critical finding even if you cannot MITM from the sandbox — cite the assignment. Env/doc knobs that are never read do not count as a control.
 
 ### Password and secret storage
 

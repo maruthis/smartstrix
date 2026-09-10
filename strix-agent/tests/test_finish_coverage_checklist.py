@@ -122,3 +122,67 @@ def test_finish_accepts_a_checklist_note_that_cites_the_baseline_count(
         )
     )
     assert result["success"] is True
+
+
+class _FakeLiveUrlReportState(_FakeReportStateWithBaselineCounts):
+    def __init__(self) -> None:
+        super().__init__({})
+        self.scan_config = {
+            "targets": [{"type": "web_application", "details": {"target_url": "https://app.example.com"}}]
+        }
+
+
+def test_finish_requires_live_http_when_the_scan_includes_a_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "strix.report.state.get_global_report_state",
+        lambda: _FakeLiveUrlReportState(),
+    )
+    result = _finish()
+    assert result["success"] is False
+    assert any("live_http" in e for e in result["errors"])
+
+
+def test_finish_accepts_live_http_when_the_scan_includes_a_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "strix.report.state.get_global_report_state",
+        lambda: _FakeLiveUrlReportState(),
+    )
+    checklist = _full_checklist()
+    checklist["live_http"] = (
+        "Sent authenticated and unauthenticated HTTP requests to https://app.example.com; 401 without a token"
+    )
+    result = _finish(coverage_checklist=checklist)
+    assert result["success"] is True
+
+
+class _FakeRepoPlusUrlReportState(_FakeReportStateWithBaselineCounts):
+    def __init__(self) -> None:
+        super().__init__({})
+        self.scan_config = {
+            "targets": [
+                {
+                    "type": "repository",
+                    "details": {"target_repo": "org/app", "cloned_repo_path": "/tmp/x"},
+                },
+                {
+                    "type": "web_application",
+                    "details": {"target_url": "https://api.example.com/v1"},
+                },
+            ]
+        }
+
+
+def test_finish_requires_live_http_for_a_combined_repo_and_url_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "strix.report.state.get_global_report_state",
+        lambda: _FakeRepoPlusUrlReportState(),
+    )
+    result = _finish()
+    assert result["success"] is False
+    assert any("live_http" in e for e in result["errors"])

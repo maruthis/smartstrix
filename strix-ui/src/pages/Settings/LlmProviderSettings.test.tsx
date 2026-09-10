@@ -6,8 +6,8 @@ import { mockFetchImpl } from "../../test/mock-fetch";
 import LlmProviderSettings from "./LlmProviderSettings";
 import { useSession } from "../../store/session";
 
-function jsonRes(body: unknown) {
-  return { ok: true, status: 200, json: async () => body };
+function jsonRes(body: unknown, status = 200) {
+  return { ok: status >= 200 && status < 300, status, statusText: "error", json: async () => body };
 }
 
 const UNSET = { model: "", api_base: null, api_key_set: false, api_key_last4: null, updated_at: new Date().toISOString() };
@@ -41,6 +41,8 @@ describe("LlmProviderSettings", () => {
     await screen.findByText("LLM Provider");
     expect(screen.getByText("No key saved yet.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Clear" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Validate" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save Changes" })).toBeEnabled();
   });
 
   it("shows the masked key hint and a Clear button when configured", async () => {
@@ -51,49 +53,96 @@ describe("LlmProviderSettings", () => {
     expect(screen.getByRole("button", { name: "Clear" })).toBeInTheDocument();
   });
 
-  it("saves model/base/key changes", async () => {
-    let sent: Record<string, unknown> | null = null;
+  it("accepts any model name without a trusted-prefix check", async () => {
+    mockFetchImpl(async () => jsonRes(UNSET));
+    renderWithProviders(<LlmProviderSettings />);
+    await screen.findByPlaceholderText("openai/gpt-5.4");
+    await userEvent.type(screen.getByPlaceholderText("openai/gpt-5.4"), "accounts/fireworks/models/kimi-k2p6");
+    expect(screen.queryByText(/trusted list/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
+  });
+
+  it("keeps Save disabled until Validate succeeds, then saves", async () => {
+    let saved: Record<string, unknown> | null = null;
     mockFetchImpl(async (url, init) => {
+      if (init?.method === "POST" && String(url).includes("/validate")) {
+        return jsonRes({ ok: true, message: "Connection verified. You can save these settings." });
+      }
       if (init?.method === "PATCH") {
-        sent = JSON.parse(init.body as string);
-        return jsonRes({ ...UNSET, model: "openai/gpt-5.4" });
+        saved = JSON.parse(init.body as string);
+        return jsonRes({ ...UNSET, model: "accounts/fireworks/models/kimi-k2p6" });
       }
       return jsonRes(UNSET);
     });
     renderWithProviders(<LlmProviderSettings />);
     await screen.findByPlaceholderText("openai/gpt-5.4");
 
-    await userEvent.type(screen.getByPlaceholderText("openai/gpt-5.4"), "openai/gpt-5.4");
-    await userEvent.type(screen.getByPlaceholderText("https://api.openai.com/v1"), "https://gateway.example.com/v1");
-    await userEvent.type(screen.getByPlaceholderText("sk-..."), "sk-new-key");
-    await userEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    await userEvent.type(screen.getByPlaceholderText("openai/gpt-5.4"), "accounts/fireworks/models/kimi-k2p6");
+    await userEvent.type(screen.getByPlaceholderText("https://api.openai.com/v1"), "https://api.fireworks.ai/inference/v1");
+    await userEvent.type(screen.getByPlaceholderText("sk-..."), "fw-new-key");
 
-    expect(sent).toMatchObject({
-      model: "openai/gpt-5.4",
-      api_base: "https://gateway.example.com/v1",
-      api_key: "sk-new-key",
+    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Validate" }));
+    await screen.findByText("Connection verified. You can save these settings.");
+    expect(screen.getByRole("button", { name: "Save Changes" })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(saved).toMatchObject({
+      model: "accounts/fireworks/models/kimi-k2p6",
+      api_base: "https://api.fireworks.ai/inference/v1",
+      api_key: "fw-new-key",
     });
   });
 
-  it("saves model/base changes without touching an already-set key", async () => {
-    let sent: Record<string, unknown> | null = null;
+  it("shows a business error when Validate fails and does not enable Save", async () => {
     mockFetchImpl(async (url, init) => {
+      if (init?.method === "POST" && String(url).includes("/validate")) {
+        return jsonRes({ detail: "The API key was rejected. Check the key and try again." }, 400);
+      }
+      return jsonRes(UNSET);
+    });
+    renderWithProviders(<LlmProviderSettings />);
+    await screen.findByPlaceholderText("openai/gpt-5.4");
+    await userEvent.type(screen.getByPlaceholderText("openai/gpt-5.4"), "openai/gpt-5.4");
+    await userEvent.type(screen.getByPlaceholderText("sk-..."), "sk-bad");
+    await userEvent.click(screen.getByRole("button", { name: "Validate" }));
+    await screen.findByText("The API key was rejected. Check the key and try again.");
+    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
+  });
+
+  it("requires re-validation after the model changes", async () => {
+    mockFetchImpl(async (url, init) => {
+      if (init?.method === "POST" && String(url).includes("/validate")) {
+        return jsonRes({ ok: true, message: "Connection verified. You can save these settings." });
+      }
+      return jsonRes(UNSET);
+    });
+    renderWithProviders(<LlmProviderSettings />);
+    await screen.findByPlaceholderText("openai/gpt-5.4");
+    await userEvent.type(screen.getByPlaceholderText("openai/gpt-5.4"), "openai/gpt-5.4");
+    await userEvent.type(screen.getByPlaceholderText("sk-..."), "sk-new-key");
+    await userEvent.click(screen.getByRole("button", { name: "Validate" }));
+    await screen.findByText("Connection verified. You can save these settings.");
+    expect(screen.getByRole("button", { name: "Save Changes" })).toBeEnabled();
+
+    await userEvent.type(screen.getByPlaceholderText("openai/gpt-5.4"), "-mini");
+    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
+  });
+
+  it("saves a blank model without validation so the org can use the server default", async () => {
+    let saved: Record<string, unknown> | null = null;
+    mockFetchImpl(async (_url, init) => {
       if (init?.method === "PATCH") {
-        sent = JSON.parse(init.body as string);
-        return jsonRes({ ...CONFIGURED, model: "openai/gpt-5-mini" });
+        saved = JSON.parse(init.body as string);
+        return jsonRes(UNSET);
       }
       return jsonRes(CONFIGURED);
     });
     renderWithProviders(<LlmProviderSettings />);
     await screen.findByDisplayValue("openai/gpt-5.4");
-
-    const modelInput = screen.getByDisplayValue("openai/gpt-5.4");
-    await userEvent.clear(modelInput);
-    await userEvent.type(modelInput, "openai/gpt-5-mini");
+    await userEvent.clear(screen.getByDisplayValue("openai/gpt-5.4"));
     await userEvent.click(screen.getByRole("button", { name: "Save Changes" }));
-
-    expect(sent).not.toHaveProperty("api_key");
-    expect(sent).toMatchObject({ model: "openai/gpt-5-mini" });
+    expect(saved).toMatchObject({ model: "" });
   });
 
   it("clears the saved key", async () => {
@@ -107,13 +156,14 @@ describe("LlmProviderSettings", () => {
     await screen.findByText("No key saved yet.");
   });
 
-  it("disables fields and hides Save/Clear for non-admins", async () => {
+  it("disables fields and hides Save/Clear/Validate for non-admins", async () => {
     useSession.setState({ me: { ...ADMIN_ME, role: "member" }, loading: false, loaded: true });
     mockFetchImpl(async () => jsonRes(CONFIGURED));
     renderWithProviders(<LlmProviderSettings />);
     await screen.findByDisplayValue("openai/gpt-5.4");
     expect(screen.getByDisplayValue("openai/gpt-5.4")).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Save Changes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Validate" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Clear" })).not.toBeInTheDocument();
   });
 });

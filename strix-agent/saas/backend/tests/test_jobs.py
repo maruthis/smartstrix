@@ -334,6 +334,52 @@ async def test_run_real_scan_domain_target_has_no_local_sources(monkeypatch):
     assert calls["scan_config"]["targets"] == [{"type": "web_application", "details": {"target_url": "https://app.example.com"}}]
 
 
+async def test_run_real_scan_legacy_full_url_hostname_is_a_single_https_target(monkeypatch):
+    """A Domain.hostname that already includes a scheme and path must not be
+    prefixed into ``https://https://...`` — that made live extra-domain
+    scans miss the real site."""
+    calls = {}
+
+    async def fake_run_strix_scan(*, scan_config, scan_id, image, local_sources):
+        calls["scan_config"] = scan_config
+
+    _install_fake_strix_module(
+        monkeypatch,
+        fake_run_strix_scan,
+        clone_repository=lambda url, run_name, dest_name, ref: (f"/tmp/cloned/{run_name}", "fake-sha"),
+    )
+
+    db = SessionLocal()
+    try:
+        org, repo = _make_org_and_repo(db)
+        domain = models.Domain(
+            org_id=org.id,
+            hostname="https://https://api-dev.example.com/api/openproject",
+            verified=True,
+        )
+        db.add(domain)
+        db.commit()
+        pentest = models.Pentest(
+            org_id=org.id,
+            target_type="repository",
+            target_id=repo.id,
+            target_label=repo.full_name,
+            extra_domain_id=domain.id,
+        )
+        db.add(pentest)
+        db.commit()
+        db.refresh(pentest)
+    finally:
+        db.close()
+
+    result = await jobs._run_real_scan(db, pentest, None)
+    assert result == []
+    assert calls["scan_config"]["targets"][1] == {
+        "type": "web_application",
+        "details": {"target_url": "https://api-dev.example.com/api/openproject"},
+    }
+
+
 async def test_run_real_scan_qualifies_persisted_standard_skills(monkeypatch):
     calls = {}
 

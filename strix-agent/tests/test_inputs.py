@@ -328,6 +328,16 @@ def test_build_root_task_repository_target() -> None:
     assert "https://example.com/repo.git" in task
 
 
+def test_build_root_task_repository_without_url_does_not_mandate_live_http() -> None:
+    config = {
+        "targets": [
+            {"type": "repository", "details": {"target_repo": "org/app", "cloned_repo_path": "/tmp/x", "workspace_subdir": "app"}},
+        ],
+    }
+    task = build_root_task(config)
+    assert "Live-site testing is mandatory" not in task
+
+
 def test_build_root_task_web_application_with_instructions() -> None:
     config = {
         "targets": [
@@ -339,7 +349,29 @@ def test_build_root_task_web_application_with_instructions() -> None:
 
     assert "URLs:" in task
     assert "https://app.example.com" in task
+    assert "Live-site testing is mandatory" in task
     assert "Special instructions: Focus on auth." in task
+    assert "JSON-RPC" in task
+
+
+def test_build_root_task_repository_plus_url_mandates_live_http() -> None:
+    config = {
+        "targets": [
+            {
+                "type": "repository",
+                "details": {
+                    "target_repo": "org/app",
+                    "cloned_repo_path": "/tmp/x",
+                    "workspace_subdir": "app",
+                },
+            },
+            {"type": "web_application", "details": {"target_url": "https://api.example.com/v1"}},
+        ],
+    }
+    task = build_root_task(config)
+    assert "Live-site testing is mandatory" in task
+    assert "https://api.example.com/v1" in task
+    assert "Repository/source review does not satisfy this" in task
 
 
 def test_build_root_task_workspace_mount_is_not_a_target() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import TYPE_CHECKING
 
 import litellm
@@ -95,3 +96,22 @@ def test_no_extra_headers_leaves_litellm_headers_untouched(monkeypatch: pytest.M
     configure_sdk_model_defaults(load_settings())
 
     assert litellm.headers is None
+
+
+def test_custom_api_base_routes_fireworks_prefix_through_openai(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STRIX_LLM", "fireworks_ai/accounts/fireworks/models/gpt-oss-120b")
+    monkeypatch.setenv("LLM_API_BASE", "https://llm.example.com")
+    monkeypatch.setenv("LLM_API_KEY", "gateway-token")
+    monkeypatch.delenv("FIREWORKS_API_KEY", raising=False)
+
+    settings = load_settings()
+    configure_sdk_model_defaults(settings)
+
+    assert settings.llm.model == "openai/fireworks_ai/accounts/fireworks/models/gpt-oss-120b"
+    assert settings.llm.api_base == "https://llm.example.com/v1"
+    assert os.environ.get("FIREWORKS_API_KEY") is None
+    client = _openai_shared.get_default_openai_client()
+    assert client is not None
+    assert str(client.base_url).rstrip("/") == "https://llm.example.com/v1"

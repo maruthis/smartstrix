@@ -2,7 +2,7 @@
   "run_id": "scan-test",
   "run_name": "scan-test",
   "start_time": "2026-08-26T06:55:57.041437+00:00",
-  "end_time": "2026-08-26T11:30:33.449630+00:00",
+  "end_time": "2026-09-10T12:23:06.529475+00:00",
   "status": "stopped",
   "auth_mode": "api_key",
   "targets_info": [],

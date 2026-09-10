@@ -50,6 +50,7 @@ from pathlib import Path
 from . import crypto, models
 from .audit import record_audit
 from .db import SessionLocal
+from .public_hosts import live_https_url
 from .settings import settings
 from .standard_skills import to_engine_skills
 from .time_utils import utcnow
@@ -412,13 +413,14 @@ async def _build_scan_targets(db, pentest: models.Pentest) -> tuple[list[dict], 
 
         if pentest.extra_domain_id:
             extra_domain = db.get(models.Domain, pentest.extra_domain_id)
-            if extra_domain is not None:
-                targets.append(
-                    {
-                        "type": "web_application",
-                        "details": {"target_url": f"https://{extra_domain.hostname}"},
-                    }
-                )
+            if extra_domain is None:
+                raise RuntimeError(f"extra domain {pentest.extra_domain_id} not found")
+            targets.append(
+                {
+                    "type": "web_application",
+                    "details": {"target_url": live_https_url(extra_domain.hostname)},
+                }
+            )
 
         return targets, local_sources
 
@@ -426,7 +428,7 @@ async def _build_scan_targets(db, pentest: models.Pentest) -> tuple[list[dict], 
         domain = db.get(models.Domain, pentest.target_id)
         if domain is None:
             raise RuntimeError(f"domain {pentest.target_id} not found")
-        targets = [{"type": "web_application", "details": {"target_url": f"https://{domain.hostname}"}}]
+        targets = [{"type": "web_application", "details": {"target_url": live_https_url(domain.hostname)}}]
         return targets, []
 
     raise RuntimeError(f"unsupported target_type {pentest.target_type!r}")

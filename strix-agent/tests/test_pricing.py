@@ -14,7 +14,8 @@ def test_resolves_common_bare_model_names() -> None:
     assert resolve_litellm_model("deepseek-v4-flash") == "deepseek/deepseek-v4-flash"
     assert resolve_litellm_model("openai/deepseek-v4-flash") == "deepseek/deepseek-v4-flash"
     assert resolve_litellm_model("grok-4.5") == "xai/grok-4.5"
-    assert resolve_litellm_model("MiniMax-M3") == "minimax/MiniMax-M3"
+    # MiniMax-M3 is listed on several providers at different token prices, so
+    # the resolver must not guess (see test_resolver_does_not_guess_...).
 
 
 def test_resolver_returns_none_for_unresolvable_model() -> None:
@@ -95,6 +96,30 @@ def test_resolver_uses_provider_when_bare_entry_has_one() -> None:
     try:
         resolve_litellm_model.cache_clear()
         assert resolve_litellm_model("example") == "example-provider/example"
+    finally:
+        litellm.model_cost = original
+        resolve_litellm_model.cache_clear()
+
+
+def test_resolver_prefers_native_provider_when_prices_match() -> None:
+    original = litellm.model_cost
+    litellm.model_cost = {
+        "openrouter/x-ai/example": {
+            "input_cost_per_token": 2e-06,
+            "output_cost_per_token": 6e-06,
+        },
+        "perplexity/xai/example": {
+            "input_cost_per_token": 2e-06,
+            "output_cost_per_token": 6e-06,
+        },
+        "xai/example": {
+            "input_cost_per_token": 2e-06,
+            "output_cost_per_token": 6e-06,
+        },
+    }
+    try:
+        resolve_litellm_model.cache_clear()
+        assert resolve_litellm_model("example") == "xai/example"
     finally:
         litellm.model_cost = original
         resolve_litellm_model.cache_clear()

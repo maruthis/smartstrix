@@ -105,7 +105,7 @@ Test every input vector with every applicable technique.
 - CORS misconfiguration exploitation
 - WebSocket security testing
 - GraphQL-specific attacks (introspection, batching, nested queries)
-- LLM/RAG/agent features: load `llm_applications` for OWASP 2026 LLM01-LLM10 coverage and `llm_prompt_injection` for deep injection testing
+- LLM/RAG/agent features: load `llm_applications` for OWASP 2026 LLM01-LLM10 coverage, `ai_ml_governance` for provider data egress / fail-closed guardrails / model pinning, and `llm_prompt_injection` for deep injection testing
 
 ## Phase 4: Vulnerability Chaining
 
@@ -156,7 +156,7 @@ Spawn specialized agents at each level. Scale horizontally to maximum paralleliz
 - Do NOT overload a single agent with multiple vulnerability types
 - Each agent focuses on one specific area or vulnerability type
 - Creates a massive parallel swarm covering every angle
-- Always include a dedicated agent for every category in `coordination/root_agent`'s "Mandatory Agents" (dependencies, secrets, access control, authentication, injection, extension points, infrastructure) — a preceding triage/recon pass ranking risk is not a reason to skip any of them, and `finish_scan` will refuse to complete without a genuine `coverage_checklist` entry for each. For dependencies specifically, a monorepo means checking every workspace's own lockfile (see `coordination/source_aware_whitebox`'s "Monorepo Coverage"), not just the first one found
+- Always include a dedicated agent for every category in `coordination/root_agent`'s "Mandatory Agents" (dependencies, secrets, access control, authentication, injection, extension points, infrastructure — and live web/API hunters whenever URLs are in the scan config) — a preceding triage/recon pass ranking risk is not a reason to skip any of them, and `finish_scan` will refuse to complete without a genuine `coverage_checklist` entry for each. For dependencies specifically, a monorepo means checking every workspace's own lockfile (see `coordination/source_aware_whitebox`'s "Monorepo Coverage"), not just the first one found
 
 ## Mindset
 

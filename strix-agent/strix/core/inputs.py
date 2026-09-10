@@ -155,6 +155,25 @@ def build_root_task(scan_config: dict[str, Any]) -> str:
             parts.append(f"\n\n{label}:")
             parts.extend(items)
 
+    if sections["URLs"]:
+        parts.extend(
+            [
+                "\n\nLive-site testing is mandatory for the URLs above.",
+                "- Spawn dedicated black-box web/API agents that send real HTTP(S) "
+                "requests to each URL (browser, intercepting proxy, or HTTP client).",
+                "- Repository/source review does not satisfy this. Recon-only probes "
+                "(for example a single unauthenticated 401) are not a pentest of the live site.",
+                "- Hunters must dynamically test the live surface (access control, "
+                "injection, authentication) against those URLs.",
+                "- If a URL is unreachable, record coverage with the concrete error "
+                "(timeout, TLS, connection refused). Do not skip it because the code "
+                "was reviewed.",
+                "- If the URL or companion repo is an MCP server, POST JSON-RPC "
+                "`initialize`, `tools/list`, and a read-only `tools/call`. A REST "
+                "401 on `/login` or `/token` is not a pentest of the MCP transport.",
+            ]
+        )
+
     # A workspace mount is a directory to work in, not an asset to test. It is
     # listed apart from the targets so it never reads as scope.
     if workspace_mount := scan_config.get("workspace_mount") or "":

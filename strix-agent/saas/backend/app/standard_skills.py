@@ -13,6 +13,10 @@ STANDARD_SKILL_NAMES: tuple[str, ...] = (
     "owasp_top_10",
     "owasp_asvs",
     "owasp_api_top_10",
+    "owasp_mcp_top_10",
+    "owasp_llm_top_10",
+    "owasp_agentic_top_10",
+    "nist_ai_rmf",
     "pci_dss",
     "nist_ssdf",
 )
@@ -41,6 +45,34 @@ STANDARD_SKILL_CATALOG: list[dict[str, str]] = [
         "label": "OWASP API Security Top 10",
         "description": (
             "API1-API10: object/function authz, mass assignment, rate limits, SSRF, inventory."
+        ),
+    },
+    {
+        "name": "owasp_mcp_top_10",
+        "label": "OWASP MCP Top 10",
+        "description": (
+            "MCP01-MCP10: tool authz, schema enforcement, secret exposure, prompt injection via tools."
+        ),
+    },
+    {
+        "name": "owasp_llm_top_10",
+        "label": "OWASP LLM Top 10",
+        "description": (
+            "LLM01-LLM10: injection, provider data leakage, excessive agency, RAG/tenant isolation."
+        ),
+    },
+    {
+        "name": "owasp_agentic_top_10",
+        "label": "OWASP Agentic Top 10",
+        "description": (
+            "ASI01-ASI10: goal hijack, tool misuse, agent supply chain, memory poisoning."
+        ),
+    },
+    {
+        "name": "nist_ai_rmf",
+        "label": "NIST AI RMF (technical)",
+        "description": (
+            "Testable Map/Measure/Manage: model identity, data egress, fail-closed guardrails. Paperwork out of scope."
         ),
     },
     {

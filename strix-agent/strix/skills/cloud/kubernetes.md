@@ -7,6 +7,19 @@ description: Kubernetes cluster security testing - RBAC, API exposure, container
 
 Kubernetes clusters expose a large attack surface through their API server, kubelet, etcd, and workload configurations. Misconfigurations in RBAC, network policies, and container security contexts are common and frequently lead to privilege escalation, lateral movement, and cluster takeover. This skill covers direct cluster access scenarios. For SSRF-mediated Kubernetes access, see the ssrf skill.
 
+## Whitebox manifests (no cluster required)
+
+If the repo contains Kubernetes YAML/Helm, review it even when you cannot reach a cluster. Missing `securityContext` fields are findings, not style notes:
+
+- `readOnlyRootFilesystem` not `true`
+- `allowPrivilegeEscalation` not `false`
+- `runAsNonRoot` not `true`
+- `capabilities.drop` does not include `ALL`
+- no CPU/memory requests and limits
+- `seccompProfile.type` not `RuntimeDefault`
+
+Run `trivy config` / `kube-linter lint` on those files. Load this skill when those manifests exist.
+
 ## Attack Surface
 
 **Scope**

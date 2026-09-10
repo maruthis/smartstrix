@@ -292,6 +292,94 @@ def run_iac_baseline(
     return findings
 
 
+_TLS_DISABLED_PATTERNS = (
+    "ssl=False",
+    "ssl = False",
+    "verify=False",
+    "verify = False",
+    "ssl.CERT_NONE",
+    "insecure_skip_verify",
+    "NODE_TLS_REJECT_UNAUTHORIZED",
+)
+_TLS_SCAN_SUFFIXES = frozenset({".py", ".js", ".ts", ".go", ".java", ".rb", ".rs"})
+_TLS_SKIP_DIR_NAMES = frozenset(
+    {
+        ".git",
+        ".hg",
+        "node_modules",
+        ".venv",
+        "venv",
+        "__pycache__",
+        "dist",
+        "build",
+        "tests",
+        "test",
+        "__tests__",
+    }
+)
+_TLS_MAX_FILES = 1200
+
+
+def run_insecure_tls_baseline(
+    source_paths: list[str], result: BaselineResult, timeout: int = _DEFAULT_TIMEOUT_S
+) -> list[BaselineFinding]:
+    """Grep for hardcoded TLS verification disablement.
+
+    No extra binary: SaaS backend images do not ship bandit/trivy, and this
+    pattern (``ssl=False`` / ``verify=False``) is how several critical
+    MCP/HTTP client bugs present in source.
+    """
+    del timeout  # filesystem walk; kept in the signature to match sibling runners
+    findings: list[BaselineFinding] = []
+    seen = 0
+    for raw in source_paths:
+        root = Path(raw)
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if seen >= _TLS_MAX_FILES:
+                return findings
+            if path.is_dir():
+                continue
+            if any(part in _TLS_SKIP_DIR_NAMES for part in path.parts):
+                continue
+            if path.suffix.lower() not in _TLS_SCAN_SUFFIXES:
+                continue
+            seen += 1
+            try:
+                lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            except OSError:
+                continue
+            rel = str(path.relative_to(root)) if path.is_relative_to(root) else str(path)
+            for lineno, line in enumerate(lines, start=1):
+                stripped = line.strip()
+                if stripped.startswith("#") or stripped.startswith("//"):
+                    continue
+                if not any(pattern in line for pattern in _TLS_DISABLED_PATTERNS):
+                    continue
+                findings.append(
+                    BaselineFinding(
+                        category="infrastructure",
+                        title="TLS certificate verification hardcoded disabled",
+                        severity="critical",
+                        target=f"{rel}:{lineno}",
+                        description=(
+                            "Outbound HTTP(S) disables TLS verification "
+                            f"({stripped[:200]}). Traffic to the configured "
+                            "backend can be intercepted or altered."
+                        ),
+                        evidence=stripped[:500],
+                        cwe="CWE-295",
+                        remediation_steps=(
+                            "Default TLS verification on. Make disablement an "
+                            "explicit, documented development-only setting."
+                        ),
+                    )
+                )
+    result.raw_output["insecure_tls"] = {"files_scanned": seen, "hits": len(findings)}
+    return findings
+
+
 def run_baseline_scan(
     local_sources: list[dict[str, Any]], timeout: int = _DEFAULT_TIMEOUT_S
 ) -> BaselineResult:
@@ -317,6 +405,10 @@ def run_baseline_scan(
         result.findings.extend(run_iac_baseline(source_paths, result, timeout))
     except Exception:
         logger.exception("baseline IaC scan failed unexpectedly")
+    try:
+        result.findings.extend(run_insecure_tls_baseline(source_paths, result, timeout))
+    except Exception:
+        logger.exception("baseline insecure-TLS scan failed unexpectedly")
 
     logger.info(
         "Baseline scan complete: %s (skipped: %s)",

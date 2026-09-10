@@ -33,6 +33,10 @@ REQUIRED_COVERAGE_CATEGORIES: tuple[str, ...] = (
     "infrastructure",
 )
 
+# Required in addition to the standing list when the scan includes a live
+# HTTP(S) URL (repo+domain combined runs, or a domain-only pentest).
+LIVE_HTTP_COVERAGE_CATEGORY = "live_http"
+
 _MIN_COVERAGE_NOTE_LENGTH = 15
 
 # Categories a Tier 3 baseline scan (strix/scan/baseline.py) can answer
@@ -43,25 +47,47 @@ _MIN_COVERAGE_NOTE_LENGTH = 15
 _BASELINE_CROSSCHECK_CATEGORIES = ("dependencies", "secrets", "infrastructure")
 
 
+def _scan_has_live_url(report_state: Any) -> bool:
+    if report_state is None:
+        return False
+    config = getattr(report_state, "scan_config", None) or {}
+    targets = config.get("targets") if isinstance(config, dict) else None
+    if not isinstance(targets, list):
+        run_record = getattr(report_state, "run_record", None) or {}
+        targets = run_record.get("targets_info") if isinstance(run_record, dict) else []
+    if not isinstance(targets, list):
+        return False
+    return any(
+        isinstance(target, dict) and target.get("type") == "web_application" for target in targets
+    )
+
+
+def _required_coverage_categories(report_state: Any) -> tuple[str, ...]:
+    if _scan_has_live_url(report_state):
+        return (*REQUIRED_COVERAGE_CATEGORIES, LIVE_HTTP_COVERAGE_CATEGORY)
+    return REQUIRED_COVERAGE_CATEGORIES
+
+
 def _validate_coverage_checklist(
     coverage_checklist: dict[str, str],
     baseline_counts: dict[str, int] | None = None,
+    required: tuple[str, ...] = REQUIRED_COVERAGE_CATEGORIES,
 ) -> list[str]:
     errors: list[str] = []
-    missing = [c for c in REQUIRED_COVERAGE_CATEGORIES if c not in coverage_checklist]
+    missing = [c for c in required if c not in coverage_checklist]
     if missing:
         errors.append(
             "coverage_checklist is missing required categories: "
             f"{', '.join(missing)}. Every category in "
-            f"{', '.join(REQUIRED_COVERAGE_CATEGORIES)} must have an entry."
+            f"{', '.join(required)} must have an entry."
         )
-    unknown = [c for c in coverage_checklist if c not in REQUIRED_COVERAGE_CATEGORIES]
+    unknown = [c for c in coverage_checklist if c not in required]
     if unknown:
         errors.append(
             f"coverage_checklist has unrecognized categories: {', '.join(unknown)}. "
-            f"Valid categories are: {', '.join(REQUIRED_COVERAGE_CATEGORIES)}."
+            f"Valid categories are: {', '.join(required)}."
         )
-    for category in REQUIRED_COVERAGE_CATEGORIES:
+    for category in required:
         note = coverage_checklist.get(category, "")
         if not note.strip():
             errors.append(f"coverage_checklist['{category}'] cannot be empty")
@@ -120,7 +146,13 @@ def _do_finish(
         errors.append("Technical analysis cannot be empty")
     if not recommendations.strip():
         errors.append("Recommendations cannot be empty")
-    errors.extend(_validate_coverage_checklist(coverage_checklist, baseline_counts))
+    errors.extend(
+        _validate_coverage_checklist(
+            coverage_checklist,
+            baseline_counts,
+            required=_required_coverage_categories(report_state),
+        )
+    )
     if errors:
         return {"success": False, "error": "Validation failed", "errors": errors}
 
@@ -289,6 +321,11 @@ async def finish_scan(
          backup/restore or other integrity-sensitive import paths
        - ``infrastructure`` — IaC (Kubernetes/Docker manifests), CI/CD
          pipeline configuration
+       - ``live_http`` — **required only when the scan config lists URLs.**
+         Black-box HTTP(S) testing of those live targets (browser, proxy,
+         or HTTP client). Source review of a companion repository does
+         not satisfy this. State which URLs were requested and what was
+         observed, or the concrete reachability failure.
 
        Each value is one to a few sentences: either what was checked and by
        which agent (cite a real finding or "reviewed, no issue found"), or —

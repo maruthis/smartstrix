@@ -8,6 +8,7 @@ import inspect
 import logging
 import os
 import time
+from urllib.parse import urlparse
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, cast
 
@@ -40,6 +41,8 @@ from strix.config import codex
 from strix.config.loader import load_settings
 from strix.config.tool_call_ids import TurnCallIdRewriter, dedupe_input
 from strix.config.tool_call_limits import TurnToolCallLimiter
+
+_KEEP_PREFIX_WITH_CUSTOM_BASE = ("openai/", "chatgpt/", "ollama/", "litellm/", "any-llm/")
 
 
 if TYPE_CHECKING:
@@ -552,10 +555,46 @@ FRONTIER_MODEL_FAMILIES = (
 )
 
 
+def route_model_for_custom_api_base(model: str | None, api_base: str | None) -> str | None:
+    """Send custom-gateway traffic through the OpenAI-compatible route.
+
+    LiteLLM treats ``fireworks_ai/...`` (and other native prefixes) as that
+    provider's public API and ignores ``LLM_API_BASE``. A LiteLLM proxy or
+    similar gateway speaks OpenAI ``/v1/chat/completions`` and expects the
+    original model id in the payload. Prefixing ``openai/`` keeps that id
+    while routing through the custom base URL.
+    """
+    if not model:
+        return model
+    name = model.strip()
+    if not api_base or not api_base.strip():
+        return name
+    if name.lower().startswith(_KEEP_PREFIX_WITH_CUSTOM_BASE):
+        return name
+    return f"openai/{name}"
+
+
+def normalize_openai_api_base(api_base: str | None) -> str | None:
+    """Ensure an origin-only gateway URL includes the OpenAI ``/v1`` prefix."""
+    if not api_base or not api_base.strip():
+        return None
+    base = api_base.strip().rstrip("/")
+    if base.endswith("/chat/completions"):
+        base = base[: -len("/chat/completions")].rstrip("/")
+    path = urlparse(base).path
+    if path in ("", "/"):
+        return f"{base}/v1"
+    return base
+
+
 def configure_sdk_model_defaults(settings: Settings) -> None:
     """Apply Strix config to SDK-native defaults."""
     llm = settings.llm
     set_tracing_disabled(True)
+    if llm.api_base:
+        llm.model = route_model_for_custom_api_base(llm.model, llm.api_base)
+        if (llm.model or "").lower().startswith("openai/"):
+            llm.api_base = normalize_openai_api_base(llm.api_base) or llm.api_base
     if codex.subscription_model(llm.model):
         return
     _configure_litellm_compatibility()
@@ -563,11 +602,14 @@ def configure_sdk_model_defaults(settings: Settings) -> None:
     if llm.api_key:
         set_default_openai_key(llm.api_key, use_for_tracing=False)
         _configure_litellm_default("api_key", llm.api_key)
-        _mirror_api_key_to_provider_env(llm.model, llm.api_key)
+        if not (llm.model or "").lower().startswith("openai/"):
+            _mirror_api_key_to_provider_env(llm.model, llm.api_key)
     if llm.api_base:
         os.environ["OPENAI_BASE_URL"] = llm.api_base
         _configure_litellm_default("api_base", llm.api_base)
         set_default_openai_api("chat_completions")
+        if (llm.model or "").lower().startswith("openai/") and not llm.extra_headers:
+            _register_openai_client_with_headers(llm, {})
     else:
         set_default_openai_api("responses")
     _configure_extra_headers(llm)

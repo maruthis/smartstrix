@@ -52,6 +52,7 @@ from strix.report.state import (
 )
 from strix.runtime import session_manager
 from strix.scan.baseline import run_baseline_scan
+from strix.scan.surface_detect import ensure_detected_standard_skills
 from strix.telemetry.logging import set_scan_id, setup_scan_logging
 from strix.tools.output_store import (
     WORKSPACE_SPILL_DIR,
@@ -378,7 +379,8 @@ async def run_strix_scan(
         is_whitebox = is_whitebox_scan(targets)
         diff_scope = scan_config.get("diff_scope")
         is_diff_scoped = bool(isinstance(diff_scope, dict) and diff_scope.get("active"))
-        skills = list(scan_config.get("skills") or [])
+        skills = ensure_detected_standard_skills(list(scan_config.get("skills") or []), local_sources)
+        scan_config["skills"] = skills
         root_task = build_root_task(scan_config)
 
         baseline_result: BaselineResult | None = None

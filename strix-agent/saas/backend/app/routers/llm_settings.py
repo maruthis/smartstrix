@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .. import crypto, models
-from ..deps import current_org, current_user, db_dep, require_admin
 from ..audit import record_audit as _record_audit
+from ..deps import current_org, current_user, db_dep, require_admin
+from ..llm_probe import LlmConnectionError, probe_llm_connection
 
 router = APIRouter(prefix="/api/settings/llm", tags=["settings"])
 
@@ -45,6 +46,48 @@ class UpdateLlmSettingsIn(BaseModel):
     # key is used server-side only and never round-tripped to the browser.
     api_key: str | None = None
     clear_api_key: bool = False
+
+
+class ValidateLlmSettingsIn(BaseModel):
+    model: str = ""
+    api_base: str | None = None
+    # Omit or send an empty string to use the key already stored for this org.
+    api_key: str | None = None
+
+
+def _resolve_probe_key(body: ValidateLlmSettingsIn, row: models.OrgLlmSettings) -> str:
+    if body.api_key and body.api_key.strip():
+        return body.api_key.strip()
+    stored = crypto.decrypt_or_legacy_plaintext(row.api_key) if row.api_key else None
+    if stored:
+        return stored
+    raise HTTPException(
+        status.HTTP_400_BAD_REQUEST,
+        detail="Enter an API key to verify this provider.",
+    )
+
+
+@router.post("/validate")
+def validate_llm_settings(
+    body: ValidateLlmSettingsIn,
+    org: models.Organization = Depends(current_org),
+    _admin=Depends(require_admin),
+    db: Session = Depends(db_dep),
+) -> dict:
+    model = (body.model or "").strip()
+    if not model:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Enter a model name to verify the connection.",
+        )
+    row = _get_or_create(db, org.id)
+    api_key = _resolve_probe_key(body, row)
+    api_base = body.api_base.strip() if body.api_base and body.api_base.strip() else None
+    try:
+        probe_llm_connection(model=model, api_key=api_key, api_base=api_base)
+    except LlmConnectionError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"ok": True, "message": "Connection verified. You can save these settings."}
 
 
 @router.patch("")

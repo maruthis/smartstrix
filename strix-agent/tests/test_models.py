@@ -8,7 +8,9 @@ from agents.model_settings import ModelSettings
 from strix.config.models import (
     RECOMMENDED_MODEL_NAMES,
     is_recommended_or_frontier_model,
+    normalize_openai_api_base,
     request_timeout_extra_args,
+    route_model_for_custom_api_base,
     supports_strict_tool_schemas,
 )
 
@@ -112,3 +114,50 @@ def test_claude_routes_reject_strict_tool_schemas(model_name: str) -> None:
 )
 def test_other_routes_keep_strict_tool_schemas(model_name: str) -> None:
     assert supports_strict_tool_schemas(model_name)
+
+
+@pytest.mark.parametrize(
+    ("model", "api_base", "expected"),
+    [
+        (
+            "fireworks_ai/accounts/fireworks/models/gpt-oss-120b",
+            "https://llm.example.com",
+            "openai/fireworks_ai/accounts/fireworks/models/gpt-oss-120b",
+        ),
+        (
+            "anthropic/claude-sonnet-4-6",
+            "https://gateway.example/v1",
+            "openai/anthropic/claude-sonnet-4-6",
+        ),
+        ("openai/gpt-5.4", "https://gateway.example/v1", "openai/gpt-5.4"),
+        ("ollama/llama3", "http://localhost:11434", "ollama/llama3"),
+        (
+            "fireworks_ai/accounts/fireworks/models/gpt-oss-120b",
+            None,
+            "fireworks_ai/accounts/fireworks/models/gpt-oss-120b",
+        ),
+        (
+            "fireworks_ai/accounts/fireworks/models/gpt-oss-120b",
+            "  ",
+            "fireworks_ai/accounts/fireworks/models/gpt-oss-120b",
+        ),
+    ],
+)
+def test_route_model_for_custom_api_base(model: str, api_base: str | None, expected: str) -> None:
+    assert route_model_for_custom_api_base(model, api_base) == expected
+
+
+@pytest.mark.parametrize(
+    ("api_base", "expected"),
+    [
+        ("https://llm.example.com", "https://llm.example.com/v1"),
+        ("https://llm.example.com/", "https://llm.example.com/v1"),
+        ("https://llm.example.com/v1", "https://llm.example.com/v1"),
+        ("https://api.fireworks.ai/inference/v1", "https://api.fireworks.ai/inference/v1"),
+        ("https://llm.example.com/v1/chat/completions", "https://llm.example.com/v1"),
+        (None, None),
+        ("", None),
+    ],
+)
+def test_normalize_openai_api_base(api_base: str | None, expected: str | None) -> None:
+    assert normalize_openai_api_base(api_base) == expected

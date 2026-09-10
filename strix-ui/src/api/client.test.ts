@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, ApiError } from "./client";
+import { api, ApiError, apiErrorMessage } from "./client";
 import { mockFetchJson } from "../test/mock-fetch";
 
 afterEach(() => {
@@ -104,6 +104,16 @@ describe("error handling", () => {
   it("falls back to statusText when the error body has no detail field", async () => {
     mockFetchJson({ status: 500, body: { message: "oops" } });
     await expect(api.get("/api/thing")).rejects.toMatchObject({ detail: "error" });
+  });
+});
+
+describe("apiErrorMessage", () => {
+  it("reads detail even when the error is not an ApiError instance", () => {
+    const duck = { status: 400, detail: "The API key was rejected. Check the key and try again." };
+    expect(apiErrorMessage(duck, "fallback")).toBe("The API key was rejected. Check the key and try again.");
+    expect(apiErrorMessage(new Error("Failed to fetch"), "We couldn't verify this provider. Try again.")).toBe(
+      "We couldn't verify this provider. Try again.",
+    );
   });
 });
 

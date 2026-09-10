@@ -205,6 +205,7 @@ def test_run_baseline_scan_never_raises_when_a_category_crashes(
     monkeypatch.setattr(baseline, "run_dependency_baseline", _boom)
     monkeypatch.setattr(baseline, "run_secret_baseline", lambda *_a, **_k: [])
     monkeypatch.setattr(baseline, "run_iac_baseline", lambda *_a, **_k: [])
+    monkeypatch.setattr(baseline, "run_insecure_tls_baseline", lambda *_a, **_k: [])
 
     result = baseline.run_baseline_scan([{"source_path": str(tmp_path)}])
 
@@ -223,9 +224,33 @@ def test_run_baseline_scan_aggregates_across_categories(
     monkeypatch.setattr(baseline, "run_dependency_baseline", lambda *_a, **_k: [dep_finding])
     monkeypatch.setattr(baseline, "run_secret_baseline", lambda *_a, **_k: [secret_finding])
     monkeypatch.setattr(baseline, "run_iac_baseline", lambda *_a, **_k: [])
+    monkeypatch.setattr(baseline, "run_insecure_tls_baseline", lambda *_a, **_k: [])
 
     result = baseline.run_baseline_scan([{"source_path": str(tmp_path)}])
 
     assert result.counts_by_category() == {"dependencies": 1, "secrets": 1}
     assert "1 dependency CVE" in result.summary_text()
     assert "1 secret" in result.summary_text()
+
+
+def test_insecure_tls_baseline_flags_hardcoded_ssl_false(tmp_path: Path) -> None:
+    client = tmp_path / "app" / "client.py"
+    client.parent.mkdir()
+    client.write_text("self._connector = aiohttp.TCPConnector(ssl=False)\n")
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_client.py").write_text("ssl=False\n")
+
+    result = baseline.BaselineResult()
+    findings = baseline.run_insecure_tls_baseline([str(tmp_path)], result)
+
+    assert len(findings) == 1
+    assert findings[0].severity == "critical"
+    assert "client.py:1" in findings[0].target
+    assert findings[0].cwe == "CWE-295"
+
+
+def test_insecure_tls_baseline_ignores_comments(tmp_path: Path) -> None:
+    (tmp_path / "client.py").write_text("# ssl=False is bad, do not copy\n")
+    result = baseline.BaselineResult()
+    assert baseline.run_insecure_tls_baseline([str(tmp_path)], result) == []

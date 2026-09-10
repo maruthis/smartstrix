@@ -235,9 +235,13 @@ def test_standards_catalog_includes_owasp_top_10() -> None:
     available = get_available_skills()
     names = {skill["name"] for skill in available["standards"]}
     assert names == {
+        "nist_ai_rmf",
         "nist_ssdf",
+        "owasp_agentic_top_10",
         "owasp_api_top_10",
         "owasp_asvs",
+        "owasp_llm_top_10",
+        "owasp_mcp_top_10",
         "owasp_top_10",
         "pci_dss",
     }
@@ -264,6 +268,8 @@ def test_new_vuln_skills_are_selectable() -> None:
         "springboot",
         "wordpress",
         "agent_mcp_config",
+        "mcp_server",
+        "ai_ml_governance",
         "exploitability_triage",
         "variant_analysis",
         "solidity_amm",

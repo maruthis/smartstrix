@@ -57,6 +57,8 @@ These are easy to skip because they're not "application code," but they're a nor
 - `Dockerfile`/`docker-compose.yml` — check the running user, exposed ports, `COPY`/`ADD` of secret files, and base image pinning.
 - CI/CD workflows (`.github/workflows/`, `.gitlab-ci.yml`, `Jenkinsfile`) — check for mutable action/image tags (`@v2` vs a pinned SHA), `curl | sh`/`curl | bash` patterns, and secrets exposed to untrusted PR triggers (`pull_request_target`, forked-PR workflows). Load `ci_cd_injection` when these files exist, including workflows that invoke Claude/Codex/Gemini.
 - Agent / MCP configs (`.claude/`, `.cursor/`, `mcp.json`, `CLAUDE.md`, `AGENTS.md`, `**/SKILL.md`) — untrusted instructions and overprivileged tools; load `agent_mcp_config`.
+- MCP **server implementations** (`tools/call`, FastMCP, tool registries, Streamable HTTP/SSE handlers) — load `mcp_server` (and `standards/owasp_mcp_top_10`). Hardcoded `ssl=False` / `verify=False`, sessionless `tools/call`, and raw ID interpolation into backend URLs are first-pass greps, not optional hardening notes.
+- LLM / RAG / agent SDKs (`openai`, `anthropic`, `litellm`, `langchain`, embeddings) — load `ai_ml_governance` and `standards/owasp_llm_top_10`. Trace user data into the provider payload and logs; a system-prompt "don't leak PII" line is not a control.
 - Any vendored/forked upstream project's version marker (`package.json` version, a `VERSION` file, a banner string) — cross-reference it against that upstream's published CVEs; a fork that has drifted from upstream security fixes is a real, checkable finding, not a guess.
 
 ## Agent Delegation Guidance
