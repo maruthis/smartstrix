@@ -41,6 +41,8 @@ services:
       SAAS_FRONTEND_ORIGIN: "http://localhost:${GATEWAY_PORT:-8095}"
       SAAS_DATABASE_URL: "sqlite:////data/strix_saas.db"
       SAAS_ENABLE_REAL_SCAN: "1"
+      # Opt-in only. Scan metadata must not leave the box by default.
+      STRIX_TELEMETRY: "0"
       STRIX_LLM: "accounts/fireworks/models/kimi-k2p6"
       LLM_API_KEY: "${LLM_API_KEY:-}"
       DOCKER_HOST: "unix:///var/run/docker.sock"

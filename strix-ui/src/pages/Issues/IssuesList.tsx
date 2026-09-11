@@ -137,11 +137,15 @@ function IssueRow({ issue }: { issue: Issue }) {
       </div>
       <div className="flex items-center gap-2">
         <StatusPill value={issue.status} />
+        <StatusPill value={issue.disposition ?? "pending"} />
         <StatusPill value={issue.severity} />
         {issue.source === "baseline_scan" && (
           <StatusPill value="baseline_scan" label="Automatically detected" />
         )}
-        {issue.source === "mock_fallback" && <StatusPill value="mock_fallback" label="Mock fallback" />}
+        {issue.source === "agent" && <StatusPill value="agent" label="Agent" />}
+        {(issue.source === "mock" || issue.source === "mock_fallback") && (
+          <StatusPill value={issue.source} label={issue.source === "mock" ? "Demo scanner" : "Mock fallback"} />
+        )}
       </div>
     </Link>
   );

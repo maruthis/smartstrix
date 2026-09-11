@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Any
 
 from agents import RunContextWrapper, function_tool
@@ -39,12 +40,38 @@ LIVE_HTTP_COVERAGE_CATEGORY = "live_http"
 
 _MIN_COVERAGE_NOTE_LENGTH = 15
 
+# A live_http note that only reports 401/Unauthorized is recon, not a pentest.
+# Notes that mention 401 are fine if they also describe tests that do not
+# depend on a session (CORS, bypass, sibling paths, tools/call, …).
+_LIVE_HTTP_401_RECON = re.compile(
+    r"\b(401|unauthorized|www-authenticate|authentication required)\b",
+    re.IGNORECASE,
+)
+_LIVE_HTTP_BEYOND_RECON = re.compile(
+    r"\b("
+    r"cors|access-control-allow|preflight|origin reflection|"
+    r"bypass|empty bearer|missing (?:auth|authorization|token)|"
+    r"cookie|"
+    r"authenticated|"
+    r"tools/call|ssrf|idor|"
+    r"rate.?limit|security headers?|"
+    r"alternate paths?|openapi|/health|"
+    r"private-token|x-api-key"
+    r")\b",
+    re.IGNORECASE,
+)
+
 # Categories a Tier 3 baseline scan (strix/scan/baseline.py) can answer
 # deterministically. When it found something, the agent's checklist note
 # has to actually reference that — closes the gap where a plausible-sounding
 # but false "nothing found" note would otherwise pass the length/emptiness
 # check above unchallenged.
-_BASELINE_CROSSCHECK_CATEGORIES = ("dependencies", "secrets", "infrastructure")
+_BASELINE_CROSSCHECK_CATEGORIES = (
+    "dependencies",
+    "secrets",
+    "infrastructure",
+    "extension_points",
+)
 
 
 def _scan_has_live_url(report_state: Any) -> bool:
@@ -63,9 +90,16 @@ def _scan_has_live_url(report_state: Any) -> bool:
 
 
 def _required_coverage_categories(report_state: Any) -> tuple[str, ...]:
-    if _scan_has_live_url(report_state):
-        return (*REQUIRED_COVERAGE_CATEGORIES, LIVE_HTTP_COVERAGE_CATEGORY)
-    return REQUIRED_COVERAGE_CATEGORIES
+    standing = (
+        (*REQUIRED_COVERAGE_CATEGORIES, LIVE_HTTP_COVERAGE_CATEGORY)
+        if _scan_has_live_url(report_state)
+        else REQUIRED_COVERAGE_CATEGORIES
+    )
+    from strix.scan.playbooks import extra_checklist_keys, playbooks_from_scan_config
+
+    scan_config = getattr(report_state, "scan_config", None) if report_state is not None else None
+    extras = extra_checklist_keys(playbooks_from_scan_config(scan_config), standing)
+    return (*standing, *extras)
 
 
 def _validate_coverage_checklist(
@@ -96,6 +130,17 @@ def _validate_coverage_checklist(
                 f"coverage_checklist['{category}'] is too short to be a real note "
                 f"('{note.strip()}') — state what was checked/found, or the specific "
                 "reason this category doesn't apply to this target. Not a one-word dismissal."
+            )
+    live_note = coverage_checklist.get(LIVE_HTTP_COVERAGE_CATEGORY, "")
+    if LIVE_HTTP_COVERAGE_CATEGORY in required and _LIVE_HTTP_401_RECON.search(live_note):
+        if _LIVE_HTTP_BEYOND_RECON.search(live_note) is None:
+            errors.append(
+                "coverage_checklist['live_http'] reads as recon-only 401/Unauthorized. "
+                "That is not a live pentest. Without credentials still test CORS/preflight, "
+                "auth bypass (empty/missing Bearer, PRIVATE-TOKEN, cookies), sibling paths "
+                "(/mcp, /health, /docs), JSON-RPC tools/call, and headers on the 401 itself. "
+                "If credentials were provided in special instructions, use them for an "
+                "authenticated pass."
             )
     for category in _BASELINE_CROSSCHECK_CATEGORIES:
         count = (baseline_counts or {}).get(category, 0)
@@ -151,6 +196,20 @@ def _do_finish(
             coverage_checklist,
             baseline_counts,
             required=_required_coverage_categories(report_state),
+        )
+    )
+    from strix.scan.playbooks import validate_playbook_finish
+    from strix.tools.coverage.tools import get_coverage_entries
+
+    scan_config = getattr(report_state, "scan_config", None) if report_state is not None else None
+    reports = list(getattr(report_state, "vulnerability_reports", []) or []) if report_state else []
+    errors.extend(
+        validate_playbook_finish(
+            scan_config=scan_config if isinstance(scan_config, dict) else None,
+            coverage_checklist=coverage_checklist,
+            agent_graph=agent_graph or {},
+            coverage_entries=get_coverage_entries(),
+            vulnerability_reports=reports,
         )
     )
     if errors:
@@ -324,8 +383,24 @@ async def finish_scan(
        - ``live_http`` — **required only when the scan config lists URLs.**
          Black-box HTTP(S) testing of those live targets (browser, proxy,
          or HTTP client). Source review of a companion repository does
-         not satisfy this. State which URLs were requested and what was
-         observed, or the concrete reachability failure.
+         not satisfy this. A first-request 401/Unauthorized is recon,
+         not coverage: still test CORS/preflight, auth bypass, sibling
+         paths, JSON-RPC ``tools/call``, and headers on the 401 body.
+         State which URLs were requested and what was observed, or the
+         concrete reachability failure.
+       - Additional keys when the harness detected playbook surfaces
+         (``mcp_server``, ``llm_prompt_injection``, ``llm_applications``,
+         ``ai_ml_governance``, ``agentic_system_security``, ``mcp_live``,
+         ``graphql``, ``ci_cd_injection``, ``kubernetes``,
+         ``agent_mcp_config``). Each one requires a dedicated child with
+         that skill and the matching ``review_mode``. A live HTTP agent
+         does **not** satisfy a white-box row. A live 401 does **not**
+         close MCP authentication in source (bind / handler / stdio).
+
+       ``finish_scan`` also rejects the call when: a required playbook
+       specialist never ran or recorded coverage; a coverage row is
+       ``outcome=reported`` but no matching ``create_vulnerability_report``
+       exists; or a required playbook row is still ``needs_follow_up``.
 
        Each value is one to a few sentences: either what was checked and by
        which agent (cite a real finding or "reviewed, no issue found"), or —

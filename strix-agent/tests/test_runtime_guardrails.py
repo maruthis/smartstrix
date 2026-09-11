@@ -50,6 +50,40 @@ async def test_spawn_child_agent_enforces_total_child_limit(monkeypatch, tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_spawn_child_agent_ignores_finished_children_toward_the_cap(
+    monkeypatch, tmp_path: Path
+):
+    coordinator = AgentCoordinator()
+    await coordinator.register("root", "Root", parent_id=None)
+    await coordinator.register("done", "Done", parent_id="root")
+    await coordinator.set_status("done", "completed")
+    monkeypatch.setattr(
+        execution,
+        "load_settings",
+        lambda: SimpleNamespace(runtime=SimpleNamespace(max_child_agents=1, max_agent_depth=3)),
+    )
+    monkeypatch.setattr(execution, "_start_child_runner", _noop_start_child_runner)
+
+    result = await execution.spawn_child_agent(
+        coordinator=coordinator,
+        factory=_factory,
+        agents_db_path=tmp_path / "agents.db",
+        sessions_to_close=[],
+        run_config=object(),
+        max_turns=1,
+        interactive=False,
+        parent_ctx={"agent_id": "root"},
+        name="Next",
+        task="Do work",
+        skills=[],
+        parent_history=[],
+    )
+
+    assert result["success"] is True
+    assert execution.count_live_child_agents(coordinator) == 1
+
+
+@pytest.mark.asyncio
 async def test_spawn_child_agent_enforces_depth_limit(monkeypatch, tmp_path: Path):
     coordinator = AgentCoordinator()
     await coordinator.register("root", "Root", parent_id=None)

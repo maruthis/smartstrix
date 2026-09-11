@@ -78,10 +78,10 @@ def _wire_runner(
 
     monkeypatch.setattr(runner, "build_strix_agent", _build_strix_agent)
 
-    async def _noop(**_kwargs: Any) -> None:
-        return None
+    async def _completed(**_kwargs: Any) -> Any:
+        return types.SimpleNamespace(final_output={"scan_completed": True})
 
-    monkeypatch.setattr(runner, "run_agent_loop", _noop)
+    monkeypatch.setattr(runner, "run_agent_loop", _completed)
     return captured
 
 

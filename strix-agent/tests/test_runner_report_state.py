@@ -79,7 +79,7 @@ async def test_a_library_caller_gets_findings_persisted_without_registering_repo
     _wire_runner(monkeypatch, tmp_path)
     assert get_global_report_state() is None
 
-    async def _agent_finds_a_bug(**_kwargs: Any) -> None:
+    async def _agent_finds_a_bug(**_kwargs: Any) -> Any:
         # Simulates what strix.tools.reporting.tool.create_vulnerability_report
         # does under the hood: look up the global report state and file
         # through it. If run_strix_scan never bootstrapped one, this would
@@ -87,6 +87,7 @@ async def test_a_library_caller_gets_findings_persisted_without_registering_repo
         rs = get_global_report_state()
         assert rs is not None, "no report state was registered for this scan"
         rs.add_vulnerability_report(title="Hardcoded secret", severity="critical")
+        return types.SimpleNamespace(final_output={"scan_completed": True})
 
     monkeypatch.setattr(runner, "run_agent_loop", _agent_finds_a_bug)
 
@@ -120,10 +121,10 @@ async def test_a_caller_that_already_registered_report_state_keeps_it(
     caller_owned = ReportState("scan-test")
     set_global_report_state(caller_owned)
 
-    async def _noop(**_kwargs: Any) -> None:
-        return None
+    async def _completed(**_kwargs: Any) -> Any:
+        return types.SimpleNamespace(final_output={"scan_completed": True})
 
-    monkeypatch.setattr(runner, "run_agent_loop", _noop)
+    monkeypatch.setattr(runner, "run_agent_loop", _completed)
 
     await runner.run_strix_scan(
         scan_config={"targets": [], "scan_mode": "deep"},
@@ -132,3 +133,25 @@ async def test_a_caller_that_already_registered_report_state_keeps_it(
     )
 
     assert get_global_report_state() is caller_owned
+
+
+@pytest.mark.asyncio
+async def test_headless_text_only_exit_raises_scan_incomplete(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    _wire_runner(monkeypatch, tmp_path)
+
+    async def _text_only(**_kwargs: Any) -> Any:
+        return types.SimpleNamespace(final_output="All done, here is a prose summary.")
+
+    monkeypatch.setattr(runner, "run_agent_loop", _text_only)
+
+    with pytest.raises(runner.ScanIncompleteError, match="finish_scan"):
+        await runner.run_strix_scan(
+            scan_config={"targets": [], "scan_mode": "deep"},
+            scan_id="scan-incomplete",
+            image="img",
+        )
+
+    run_record = json.loads((tmp_path / "run.json").read_text(encoding="utf-8"))
+    assert run_record["status"] == "failed"

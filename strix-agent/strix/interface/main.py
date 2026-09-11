@@ -497,6 +497,9 @@ def main() -> None:
 
     if args.non_interactive:
         report_state = get_global_report_state()
+        run_status = report_state.run_record.get("status") if report_state else None
+        if run_status and run_status != "completed":
+            sys.exit(1)
         if report_state and report_state.vulnerability_reports:
             sys.exit(2)
 

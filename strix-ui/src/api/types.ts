@@ -93,7 +93,75 @@ export interface Pentest {
   llm_output_tokens: number;
   llm_total_tokens: number;
   mock_fallback_reason: string | null;
+  coverage: PentestCoverage | null;
   created_at: string;
+}
+
+export interface PentestCoverageGap {
+  kind: string;
+  surface: string;
+  risk_area: string;
+  detail: string;
+}
+
+export interface PentestCoverageAgent {
+  agent_id: string;
+  agent_name: string;
+  status: string;
+  skills: string[];
+  is_root?: boolean;
+}
+
+export interface PentestCoverage {
+  mode: "real" | "mock";
+  finish_scan: boolean;
+  complete: boolean;
+  scan_status?: string | null;
+  exit_reason?: string | null;
+  caveats: string[];
+  summary: Record<string, unknown>;
+  gaps: PentestCoverageGap[];
+  agents: PentestCoverageAgent[];
+  recall?: ChecklistRecall;
+}
+
+export interface ChecklistRecallItem {
+  id: string;
+  title: string;
+  severity: Severity;
+  status: "hit" | "miss";
+  matched_finding_titles: string[];
+}
+
+export interface ChecklistRecall {
+  applicable: boolean;
+  checklist_id: string;
+  title: string;
+  source: string;
+  matched: number;
+  missed: number;
+  total: number;
+  recall: number;
+  items: ChecklistRecallItem[];
+}
+
+export interface PentestCompareIssue {
+  id: string;
+  title: string;
+  severity: Severity;
+  source: string | null;
+  file_path: string | null;
+  line_number: number | null;
+  disposition: IssueDisposition;
+}
+
+export interface PentestCompare {
+  previous_pentest_id: string | null;
+  previous_status?: string;
+  previous_finished_at?: string | null;
+  still_open: PentestCompareIssue[];
+  new: PentestCompareIssue[];
+  gone: PentestCompareIssue[];
 }
 
 export interface StandardSkill {
@@ -116,6 +184,7 @@ export interface PentestSchedule {
 
 export type Severity = "critical" | "high" | "medium" | "low";
 export type IssueStatus = "open" | "in_progress" | "snoozed" | "fixed" | "ignored";
+export type IssueDisposition = "pending" | "confirmed" | "rejected" | "needs_repro" | "out_of_scope";
 
 export interface Issue {
   id: string;
@@ -139,9 +208,12 @@ export interface Issue {
   target: string;
   endpoint: string;
   fix_effort: string;
-  // "baseline_scan" for a Tier 3 deterministic finding (trivy/gitleaks/kube-linter,
-  // filed before the agent loop starts); null for everything an agent validated.
   source: string | null;
+  disposition: IssueDisposition;
+  disposition_note: string | null;
+  file_path: string | null;
+  line_number: number | null;
+  specialist_name: string | null;
   created_at: string;
   updated_at: string;
 }

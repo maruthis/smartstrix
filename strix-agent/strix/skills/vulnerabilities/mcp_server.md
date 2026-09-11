@@ -45,6 +45,8 @@ curl -sS -H 'Content-Type: application/json' \
 
 Record status, body, and whether `tools/call` is accepted without a session, token, or `initialize`.
 
+If the MCP URL itself returns `401`/`WWW-Authenticate`, that is a finding about *unauthenticated* tool use (or a locked-down transport) — not a reason to stop. Keep going without credentials: CORS/preflight on the 401, auth-header bypasses (`Authorization`, `PRIVATE-TOKEN`, empty Bearer, cookies), sibling paths (`/mcp`, `/sse`, `/health`), and `tools/call` with a benign method. If the operator supplied a test token in special instructions, use it for a second authenticated pass. Do not skip white-box review of the handler because live calls were unauthorized. `finish_scan` requires a dedicated `review_mode='whitebox'` `mcp_server` child on source; a live 401/CORS agent does not satisfy that row, and a checklist note that treats the 401 as "MCP is authenticated" is rejected.
+
 ## What to prove
 
 ### Unauthenticated or sessionless `tools/call` (MCP07 / API2)

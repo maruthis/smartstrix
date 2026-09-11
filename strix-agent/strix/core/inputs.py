@@ -85,6 +85,35 @@ def _render_api_spec(details: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _render_required_playbooks(scan_config: dict[str, Any]) -> list[str]:
+    """Hard spawn list the harness will enforce at finish_scan."""
+    raw = scan_config.get("required_playbooks") or []
+    if not isinstance(raw, list) or not raw:
+        return []
+    lines = [
+        "\n\nRequired specialist playbooks (finish_scan is rejected until each exists):",
+        "- Spawn a dedicated child for each row. Live HTTP agents do not satisfy white-box rows.",
+        "- Pass review_mode='whitebox' or 'live' (or 'both') on create_agent.",
+        "- Each child must record_coverage for its skill. outcome=reported requires "
+        "create_vulnerability_report — executive-summary prose is not a finding.",
+        "- A live 401/Unauthorized does not close MCP/LLM authentication in source. "
+        "Review bind address, handler auth, and stdio separately.",
+    ]
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        skills = item.get("skills") or []
+        skill_list = ", ".join(str(skill) for skill in skills) if isinstance(skills, list) else ""
+        mode = item.get("review_mode") or "whitebox"
+        label = item.get("label") or skill_list
+        hint = item.get("spawn_hint") or ""
+        lines.append(
+            f"- [{mode}] {label}: create_agent(skills=[{skill_list}], review_mode='{mode}')"
+            + (f" — {hint}" if hint else "")
+        )
+    return lines
+
+
 def _render_workspace_files(scan_config: dict[str, Any]) -> list[str]:
     """List the files the user handed to the run.
 
@@ -155,6 +184,8 @@ def build_root_task(scan_config: dict[str, Any]) -> str:
             parts.append(f"\n\n{label}:")
             parts.extend(items)
 
+    parts.extend(_render_required_playbooks(scan_config))
+
     if sections["URLs"]:
         parts.extend(
             [
@@ -171,6 +202,18 @@ def build_root_task(scan_config: dict[str, Any]) -> str:
                 "- If the URL or companion repo is an MCP server, POST JSON-RPC "
                 "`initialize`, `tools/list`, and a read-only `tools/call`. A REST "
                 "401 on `/login` or `/token` is not a pentest of the MCP transport.",
+                "- A 401/WWW-Authenticate on the live URL itself is also not a "
+                "stopping condition. No live credentials were necessarily supplied. "
+                "Without a session you MUST still: (1) read CORS and other headers "
+                "on OPTIONS and on the 401; (2) try auth bypass (missing header, "
+                "empty Bearer, Basic, PRIVATE-TOKEN, query token, cookies); "
+                "(3) probe sibling paths (/mcp, /sse, /health, /docs, /openapi.json); "
+                "(4) POST JSON-RPC `tools/call` — some servers auth only some methods; "
+                "(5) use the companion repo to find optional auth or default tokens "
+                "and replay those against the live URL. Do not record live_http as "
+                "no_issue_found solely because unauthenticated calls returned 401. "
+                "If Special instructions include a test token or account, run a "
+                "second authenticated pass (BOLA, tool authz, injection).",
             ]
         )
 

@@ -28,7 +28,7 @@ Out of scope: the upstream SaaS the MCP server proxies to, unless that URL is al
 
 ## Spawn rules
 
-- Always spawn `mcp_server` first on an MCP implementation — it covers TLS-to-backend, unauthenticated `tools/call`, schema enforcement, destructive tools without confirm, and path-building from raw IDs
+- Always spawn `mcp_server` first on an MCP implementation with `review_mode='whitebox'` — it covers TLS-to-backend, unauthenticated `tools/call`, schema enforcement, destructive tools without confirm, bind address, and path-building from raw IDs. A live 401/CORS agent does not satisfy this row.
 - MCP05: skip the RCE specialist only when there is no shell/exec/eval path in handlers (still grep for it; a clean grep is a coverage note, not a skip-before-looking)
 - MCP04: the standing SCA agent already required by `coordination/root_agent` counts; do not spawn a second identical trivy pass
 - Live URL in scope: POST JSON-RPC `initialize`, `tools/list`, and `tools/call` to that URL. A REST `401` on `/login` is not an MCP pentest

@@ -6,6 +6,7 @@ from html import escape
 from io import BytesIO
 
 from . import models
+from .scan_quality import score_pentest_recall
 
 SEVERITY_ORDER = ["critical", "high", "medium", "low"]
 
@@ -31,6 +32,21 @@ STATUS_LABELS = {
     "snoozed": "Snoozed",
     "fixed": "Fixed",
     "ignored": "Ignored / Accepted Risk",
+}
+
+DISPOSITION_LABELS = {
+    "pending": "Pending human review",
+    "confirmed": "Confirmed",
+    "rejected": "Rejected",
+    "needs_repro": "Needs reproduction",
+    "out_of_scope": "Out of scope",
+}
+
+SOURCE_LABELS = {
+    "baseline_scan": "Deterministic baseline",
+    "agent": "Agent analysis",
+    "mock": "Demo scanner",
+    "mock_fallback": "Mock fallback (historical)",
 }
 
 
@@ -120,6 +136,10 @@ def _finding_detail(index: int, issue: models.Issue) -> str:
         <tr><th>Impact</th><td>{impact}</td></tr>
         <tr><th>CVSS Score</th><td>{cvss}</td></tr>
         <tr><th>Current Status</th><td>{STATUS_LABELS.get(issue.status, issue.status.capitalize())}</td></tr>
+        <tr><th>Human disposition</th><td>{DISPOSITION_LABELS.get(issue.disposition or "pending", issue.disposition or "pending")}</td></tr>
+        <tr><th>Source</th><td>{SOURCE_LABELS.get(issue.source or "agent", issue.source or "agent")}</td></tr>
+        <tr><th>Location</th><td>{_esc(_issue_location(issue))}</td></tr>
+        <tr><th>Specialist</th><td>{_esc(issue.specialist_name or "—")}</td></tr>
         <tr><th>Observation</th><td>{_esc(observation)}</td></tr>
         <tr><th>Risk / Business Impact</th><td>{_esc(business_impact)}</td></tr>
         <tr><th>Recommendation</th><td>{_esc(recommendation)}</td></tr>
@@ -169,7 +189,84 @@ _BEST_PRACTICES = [
 ]
 
 
-def render_report_html(pentest: models.Pentest, issues: list[models.Issue], org: models.Organization) -> str:
+def _issue_location(issue: models.Issue) -> str:
+    if issue.file_path and issue.line_number:
+        return f"{issue.file_path}:{issue.line_number}"
+    if issue.file_path:
+        return issue.file_path
+    return issue.target or issue.endpoint or "Not provided"
+
+
+def _coverage_section(pentest: models.Pentest) -> str:
+    coverage = pentest.coverage if isinstance(pentest.coverage, dict) else {}
+    if not coverage:
+        return '<p class="muted">No coverage record was persisted for this run.</p>'
+    finish = "Yes" if coverage.get("finish_scan") else "No"
+    complete = "Yes" if coverage.get("complete") else "No"
+    caveats = coverage.get("caveats") or []
+    gaps = coverage.get("gaps") or []
+    agents = coverage.get("agents") or []
+    caveat_html = "".join(f"<li>{_esc(str(item))}</li>" for item in caveats)
+    gap_rows = "".join(
+        f"<tr><td>{_esc(str(gap.get('kind', '')))}</td><td>{_esc(str(gap.get('risk_area') or gap.get('surface') or ''))}</td><td>{_esc(str(gap.get('detail', '')))}</td></tr>"
+        for gap in gaps
+        if isinstance(gap, dict)
+    ) or '<tr><td colspan="3">No coverage gaps were recorded.</td></tr>'
+    agent_rows = "".join(
+        f"<tr><td>{_esc(str(agent.get('agent_name', '')))}</td><td>{_esc(str(agent.get('status', '')))}</td><td>{_esc(', '.join(agent.get('skills') or []))}</td></tr>"
+        for agent in agents
+        if isinstance(agent, dict)
+    ) or '<tr><td colspan="3">No specialist agents were recorded.</td></tr>'
+    return f"""
+    <table class="exec-table">
+      <tr><th>finish_scan called</th><td>{finish}</td></tr>
+      <tr><th>Coverage complete</th><td>{complete}</td></tr>
+      <tr><th>Scan status</th><td>{_esc(str(coverage.get("scan_status") or "unknown"))}</td></tr>
+      <tr><th>Mode</th><td>{_esc(str(coverage.get("mode") or "real"))}</td></tr>
+    </table>
+    {"<ul>" + caveat_html + "</ul>" if caveat_html else ""}
+    <h3>Gaps</h3>
+    <table class="std-table">
+      <tr><th>Kind</th><th>Area</th><th>Detail</th></tr>
+      {gap_rows}
+    </table>
+    <h3>Specialists</h3>
+    <table class="std-table">
+      <tr><th>Agent</th><th>Status</th><th>Skills</th></tr>
+      {agent_rows}
+    </table>
+    """
+
+
+def _recall_section(pentest: models.Pentest, issues: list[models.Issue]) -> str:
+    score = score_pentest_recall(pentest, issues)
+    if not score.get("applicable"):
+        return ""
+    rows = "".join(
+        f"<tr><td>{_esc(str(item.get('id', '')))}</td>"
+        f"<td>{_esc(str(item.get('title', '')))}</td>"
+        f"<td>{_esc(str(item.get('severity', '')))}</td>"
+        f"<td>{_esc(str(item.get('status', '')))}</td></tr>"
+        for item in score.get("items") or []
+        if isinstance(item, dict)
+    )
+    return f"""
+    <h2>Recall vs known defects</h2>
+    <p class="muted">{_esc(str(score.get('title') or ''))}. Matched {score.get('matched', 0)} of {score.get('total', 0)}. Misses are the quality loop, not a clean bill of health.</p>
+    <table class="std-table">
+      <tr><th>ID</th><th>Known defect</th><th>Severity</th><th>This run</th></tr>
+      {rows}
+    </table>
+    """
+
+
+def render_report_html(
+    pentest: models.Pentest,
+    issues: list[models.Issue],
+    org: models.Organization,
+    *,
+    confirmed_only: bool = False,
+) -> str:
     counts = _counts(issues)
     total = sum(counts.values())
     posture = _posture(counts)
@@ -195,7 +292,12 @@ def render_report_html(pentest: models.Pentest, issues: list[models.Issue], org:
         </table>
         """
         if issues
-        else '<p class="muted">No vulnerabilities were identified during this engagement.</p>'
+        else (
+            '<p class="muted">No confirmed findings are included in this assistant draft. '
+            "Absence of confirmed issues is not a clean bill of health.</p>"
+            if confirmed_only
+            else '<p class="muted">No findings are included in this assistant draft. This is not a residual-risk closure.</p>'
+        )
     )
 
     details_or_none = detail_blocks if issues else ""
@@ -233,12 +335,16 @@ def render_report_html(pentest: models.Pentest, issues: list[models.Issue], org:
   .muted {{ color: #666; }}
   .posture {{ font-weight: 700; }}
   .footer-note {{ margin-top: 40px; font-size: 10px; color: #999; }}
+  .draft-banner {{
+    border: 1px solid #b45309; background: #fff7ed; color: #9a3412;
+    padding: 10px 12px; margin: 16px 0 24px; font-size: 12px;
+  }}
 </style>
 </head>
 <body>
 
 <div class="cover">
-  <div class="brand">Vulnerability Assessment &amp; Penetration Testing Report</div>
+  <div class="brand">Assistant draft — human sign-off required</div>
   <h1>{_esc(pentest.target_label)}</h1>
   <div class="meta">
     Prepared for: {_esc(org.name)}<br/>
@@ -250,8 +356,19 @@ def render_report_html(pentest: models.Pentest, issues: list[models.Issue], org:
 
 <div style="page-break-before: always;"></div>
 
+<div class="draft-banner">
+  This is an assistant-generated draft for a human pentest program.
+  {"Export is limited to findings a reviewer marked confirmed." if confirmed_only else "Do not treat completed status, severity counts, or posture as residual-risk closure."}
+  A human must confirm each finding before it is used as evidence.
+</div>
+
+<h2>What was not tested</h2>
+{_coverage_section(pentest)}
+
+{_recall_section(pentest, issues)}
+
 <h2>Executive Summary</h2>
-<p>This section summarizes the VAPT engagement against {_esc(pentest.target_label)}, highlighting its principal findings and overall security posture.</p>
+<p>This section summarizes the assistant pass against {_esc(pentest.target_label)}. Posture below is derived only from the findings in this export and is not an assurance rating.</p>
 <table class="exec-table">
   <tr><th>Engagement Date</th><td>{_fmt_month(pentest.started_at or pentest.created_at)}</td></tr>
   <tr><th>Target Systems</th><td>{_esc(pentest.target_label)} ({target_kind})</td></tr>

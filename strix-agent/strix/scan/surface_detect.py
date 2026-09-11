@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 
 _SKIP_DIR_NAMES = frozenset(
     {
@@ -18,9 +23,12 @@ _SKIP_DIR_NAMES = frozenset(
         "build",
         ".tox",
         ".mypy_cache",
+        "site-packages",
+        "dist-packages",
     }
 )
 _CODE_SUFFIXES = frozenset({".py", ".ts", ".js", ".mjs", ".go", ".rs", ".java", ".rb"})
+_CONFIG_SUFFIXES = frozenset({".yml", ".yaml", ".json", ".md", ".toml"})
 _MCP_MARKERS = (
     "tools/call",
     "FastMCP",
@@ -60,11 +68,61 @@ _AGENTIC_MARKERS = (
     "function_call",
     "bind_tools",
 )
+_GRAPHQL_MARKERS = (
+    "graphql",
+    "GraphQL",
+    "gql(",
+    "graphene",
+    "ariadne",
+    "strawberry.federation",
+)
+_K8S_MARKERS = (
+    "kind: Deployment",
+    "kind: DaemonSet",
+    "kind: StatefulSet",
+    "kind: RoleBinding",
+    "apiVersion: apps/",
+    "apiVersion: rbac.authorization.k8s.io",
+)
+_CICD_FILENAMES = frozenset(
+    {
+        ".gitlab-ci.yml",
+        "gitlab-ci.yml",
+        "jenkinsfile",
+        "azure-pipelines.yml",
+        "bitbucket-pipelines.yml",
+        ".travis.yml",
+    }
+)
+_AGENT_CONFIG_FILENAMES = frozenset(
+    {
+        "claude.md",
+        "agents.md",
+        "skill.md",
+        "mcp.json",
+    }
+)
 _MAX_FILES = 800
-_ALL_SURFACES = frozenset({"mcp", "llm", "agentic"})
+_AI_SURFACES = frozenset({"mcp", "llm", "agentic"})
+_ALL_SURFACES = frozenset(
+    {"mcp", "llm", "agentic", "graphql", "cicd", "kubernetes", "agent_mcp_config"}
+)
 
 
-def _iter_code_files(source_paths: list[str], *, max_files: int):
+def source_paths_from_local(local_sources: list[dict[str, Any]] | None) -> list[str]:
+    """Absolute trees the harness mounted for this scan."""
+    return [
+        str(source["source_path"])
+        for source in local_sources or []
+        if isinstance(source, dict) and source.get("source_path")
+    ]
+
+
+def _should_skip(path: Path) -> bool:
+    return any(part in _SKIP_DIR_NAMES for part in path.parts)
+
+
+def _iter_text_files(source_paths: list[str], *, max_files: int) -> Iterator[tuple[Path, str]]:
     seen = 0
     for raw in source_paths:
         root = Path(raw)
@@ -73,24 +131,52 @@ def _iter_code_files(source_paths: list[str], *, max_files: int):
         for path in root.rglob("*"):
             if seen >= max_files:
                 return
-            if path.is_dir():
+            if path.is_dir() or _should_skip(path):
                 continue
-            if any(part in _SKIP_DIR_NAMES for part in path.parts):
-                continue
-            if path.suffix.lower() not in _CODE_SUFFIXES:
+            suffix = path.suffix.lower()
+            name = path.name.lower()
+            is_code = suffix in _CODE_SUFFIXES
+            is_config = (
+                suffix in _CONFIG_SUFFIXES or name in _CICD_FILENAMES or name == "dockerfile"
+            )
+            if not is_code and not is_config:
                 continue
             seen += 1
             try:
                 text = path.read_text(encoding="utf-8", errors="ignore")
             except OSError:
                 continue
-            yield text
+            yield path, text
 
 
-def detect_ai_surfaces(source_paths: list[str], *, max_files: int = _MAX_FILES) -> set[str]:
-    """Return ``{"mcp", "llm", "agentic"}`` subsets found in local trees."""
+def _filename_surfaces(path: Path) -> set[str]:
+    name = path.name.lower()
+    parts_lower = {part.lower() for part in path.parts}
     found: set[str] = set()
-    for text in _iter_code_files(source_paths, max_files=max_files):
+    if name in _CICD_FILENAMES or name == "jenkinsfile":
+        found.add("cicd")
+    if (
+        ".github" in parts_lower
+        and "workflows" in parts_lower
+        and path.suffix.lower()
+        in {
+            ".yml",
+            ".yaml",
+        }
+    ):
+        found.add("cicd")
+    if name in _AGENT_CONFIG_FILENAMES:
+        found.add("agent_mcp_config")
+    if name == "dockerfile" or name.startswith("dockerfile."):
+        found.add("kubernetes")
+    return found
+
+
+def detect_surfaces(source_paths: list[str], *, max_files: int = _MAX_FILES) -> set[str]:
+    """Return every cheaply-detected playbook surface in local trees."""
+    found: set[str] = set()
+    for path, text in _iter_text_files(source_paths, max_files=max_files):
+        found.update(_filename_surfaces(path))
         if "mcp" not in found and any(marker in text for marker in _MCP_MARKERS):
             found.add("mcp")
             found.add("llm")
@@ -99,9 +185,18 @@ def detect_ai_surfaces(source_paths: list[str], *, max_files: int = _MAX_FILES) 
             found.add("llm")
         if "agentic" not in found and any(marker in text for marker in _AGENTIC_MARKERS):
             found.add("agentic")
+        if "graphql" not in found and any(marker in text for marker in _GRAPHQL_MARKERS):
+            found.add("graphql")
+        if "kubernetes" not in found and any(marker in text for marker in _K8S_MARKERS):
+            found.add("kubernetes")
         if found >= _ALL_SURFACES:
             break
     return found
+
+
+def detect_ai_surfaces(source_paths: list[str], *, max_files: int = _MAX_FILES) -> set[str]:
+    """Return ``{"mcp", "llm", "agentic"}`` subsets found in local trees."""
+    return detect_surfaces(source_paths, max_files=max_files) & _AI_SURFACES
 
 
 def looks_like_mcp_server(source_paths: list[str], *, max_files: int = _MAX_FILES) -> bool:
@@ -125,11 +220,7 @@ def ensure_detected_standard_skills(
     skills: list[str], local_sources: list[dict[str, Any]] | None
 ) -> list[str]:
     """Append MCP / LLM / agentic coverage maps when those surfaces exist."""
-    paths = [
-        str(source["source_path"])
-        for source in local_sources or []
-        if isinstance(source, dict) and source.get("source_path")
-    ]
+    paths = source_paths_from_local(local_sources)
     surfaces = detect_ai_surfaces(paths)
     next_skills = list(skills)
     if "mcp" in surfaces:

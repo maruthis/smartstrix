@@ -7,6 +7,8 @@ description: "End-to-end security testing for LLM, RAG, embedding, agent, and mo
 
 Use this as the umbrella workflow for the [OWASP Top 10 for LLM Applications 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/). Load `llm_prompt_injection` for deeper LLM01 testing and the relevant conventional vulnerability skill when an LLM-controlled value reaches a browser, query, command, URL, file, or authorization sink.
 
+When this skill is a required playbook, spawn a **white-box** child (`review_mode='whitebox'`) that reads provider clients, RAG, and output sinks in source. Live HTTP recon does not satisfy the row. File findings with `create_vulnerability_report`.
+
 Treat the identifiers as a coverage taxonomy, not as report titles. Classify a finding by its technical root cause and affected trust boundary. One exploit chain may contain several OWASP categories, while one root cause should not become ten duplicate reports.
 
 The LLM list covers the model as a component of an application. When a model acts through tools, persistent memory, peer agents, or autonomous workflows, apply this list and pair the assessment with the OWASP Top 10 for Agentic Applications 2026; do not force every agentic failure into an LLM category.

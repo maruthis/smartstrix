@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import tempfile
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -22,7 +24,10 @@ from strix.core.execution import (
     notify_parent_on_terminal,
 )
 from strix.core.sessions import seed_initial_input
+from strix.report.state import ReportState, reset_global_report_state, set_global_report_state
+from strix.scan.playbooks import RequiredPlaybook, playbook_to_dict
 from strix.tools.agents_graph.tools import agent_finish, stop_agent
+from strix.tools.coverage.tools import hydrate_coverage_from_disk
 from strix.tools.finish.tool import finish_scan
 
 
@@ -56,6 +61,7 @@ class _StructuredRefusalStream:
 async def _call_finish_scan(
     coordinator: AgentCoordinator, agent_id: str, parent_id: str | None
 ) -> dict[str, Any]:
+    hydrate_coverage_from_disk(Path(tempfile.mkdtemp()))
     ctx = ToolContext(
         context={"coordinator": coordinator, "agent_id": agent_id, "parent_id": parent_id},
         tool_name="finish_scan",
@@ -606,6 +612,42 @@ async def test_stop_agent_notifies_a_parent_that_is_not_the_stopper(tmp_path: An
     # The stopper already knows; only the waiting parent needs telling.
     assert coordinator.pending_counts.get("root", 0) == 0
     session.close()
+
+
+@pytest.mark.asyncio
+async def test_stop_agent_refuses_to_kill_a_required_playbook() -> None:
+    coordinator = AgentCoordinator()
+    await coordinator.register("root", "strix", parent_id=None)
+    await coordinator.register(
+        "mcp-wb",
+        "MCP Server (Whitebox)",
+        parent_id="root",
+        skills=["mcp_server"],
+        review_mode="whitebox",
+        task="Review the MCP handler in source",
+    )
+    report = ReportState("scan-protect")
+    report.scan_config = {
+        "required_playbooks": [
+            playbook_to_dict(
+                RequiredPlaybook(
+                    skills=("mcp_server",),
+                    review_mode="whitebox",
+                    checklist_key="mcp_server",
+                    label="MCP server (source)",
+                    spawn_hint="",
+                )
+            )
+        ]
+    }
+    set_global_report_state(report)
+    try:
+        result = await _call_stop_agent(coordinator, "root", "mcp-wb")
+        assert result["success"] is False
+        assert "required playbook" in result["error"]
+        assert coordinator.statuses["mcp-wb"] == "running"
+    finally:
+        reset_global_report_state()
 
 
 @pytest.mark.asyncio

@@ -36,9 +36,9 @@ def test_issue_lifecycle(auth_client):
     detail = client.get(f"/api/issues/{issue['id']}")
     assert detail.status_code == 200
     assert detail.json()["title"] == issue["title"]
-    # Mock-scan findings carry no Tier 3 baseline-scan provenance.
-    assert issue["source"] is None
-    assert detail.json()["source"] is None
+    assert issue["source"] == "mock"
+    assert detail.json()["source"] == "mock"
+    assert issue["disposition"] == "pending"
 
     update = client.patch(f"/api/issues/{issue['id']}/status", json={"status": "fixed"})
     assert update.status_code == 200
@@ -196,3 +196,58 @@ def test_severity_and_status_counts_correct_across_multiple_scans(auth_client):
     assert after["status_counts"]["fixed"] == 1
     assert after["status_counts"]["all"] == len(all_items["items"])
     assert sum(after["severity_counts"].values()) == total_severity - 1
+
+
+def test_issue_disposition_requires_a_note_and_persists(auth_client):
+    client, _org = auth_client
+    repo = add_repo(client)
+    _run_pentest_to_completion(client, repo)
+    issue = client.get("/api/issues").json()["items"][0]
+
+    missing_note = client.patch(
+        f"/api/issues/{issue['id']}/disposition",
+        json={"disposition": "confirmed"},
+    )
+    assert missing_note.status_code == 400
+    assert missing_note.json()["detail"] == "disposition_note_required"
+
+    invalid = client.patch(
+        f"/api/issues/{issue['id']}/disposition",
+        json={"disposition": "ship_it", "note": "nope"},
+    )
+    assert invalid.status_code == 400
+    assert invalid.json()["detail"] == "invalid_disposition"
+
+    updated = client.patch(
+        f"/api/issues/{issue['id']}/disposition",
+        json={"disposition": "confirmed", "note": "Reproduced against staging."},
+    )
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["disposition"] == "confirmed"
+    assert body["disposition_note"] == "Reproduced against staging."
+
+
+def test_issue_retest_queues_a_focused_pentest(auth_client):
+    from app.db import SessionLocal
+    from app import models
+
+    client, _org = auth_client
+    repo = add_repo(client)
+    _run_pentest_to_completion(client, repo)
+    issue = client.get("/api/issues").json()["items"][0]
+
+    res = client.post(f"/api/issues/{issue['id']}/retest")
+    assert res.status_code == 200
+    pentest = res.json()
+    assert pentest["status"] in {"queued", "running", "completed"}
+    assert pentest["scan_mode"] == "quick"
+    assert pentest["target_id"] == repo["id"]
+
+    db = SessionLocal()
+    try:
+        row = db.get(models.Pentest, pentest["id"])
+        assert issue["title"] in (row.custom_instructions or "")
+        assert "Retest this previously reported finding" in (row.custom_instructions or "")
+    finally:
+        db.close()

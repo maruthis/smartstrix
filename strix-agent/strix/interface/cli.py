@@ -14,7 +14,7 @@ from rich.text import Text
 
 from strix.config import load_settings
 from strix.config.settings import DEFAULT_MAX_TURNS
-from strix.core.runner import run_strix_scan
+from strix.core.runner import ScanIncompleteError, run_strix_scan
 from strix.report.state import ReportState, set_global_report_state
 from strix.runtime import session_manager
 
@@ -191,17 +191,24 @@ async def run_cli(args: Any) -> None:  # noqa: PLR0915
                     len(scan_config.get("targets") or []),
                     bool(getattr(args, "interactive", False)),
                 )
-                await run_strix_scan(
-                    scan_config=scan_config,
-                    scan_id=args.run_name,
-                    image=_resolve_sandbox_image(),
-                    local_sources=getattr(args, "local_sources", None) or [],
-                    extra_files=read_workspace_files(getattr(args, "workspace_files", None)),
-                    interactive=bool(getattr(args, "interactive", False)),
-                    max_budget_usd=getattr(args, "max_budget_usd", None),
-                    max_turns=getattr(args, "max_turns", DEFAULT_MAX_TURNS),
-                    status_sink=_note_startup_phase,
-                )
+                try:
+                    await run_strix_scan(
+                        scan_config=scan_config,
+                        scan_id=args.run_name,
+                        image=_resolve_sandbox_image(),
+                        local_sources=getattr(args, "local_sources", None) or [],
+                        extra_files=read_workspace_files(getattr(args, "workspace_files", None)),
+                        interactive=bool(getattr(args, "interactive", False)),
+                        max_budget_usd=getattr(args, "max_budget_usd", None),
+                        max_turns=getattr(args, "max_turns", DEFAULT_MAX_TURNS),
+                        status_sink=_note_startup_phase,
+                    )
+                except ScanIncompleteError as exc:
+                    logger.warning("%s", exc)
+                    console.print(
+                        "[bold red]Scan incomplete:[/] finish_scan was never called. "
+                        "Do not treat this run as a completed pentest."
+                    )
             finally:
                 stop_updates.set()
                 update_thread.join(timeout=1)

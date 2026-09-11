@@ -3,9 +3,21 @@ scan-coverage plan — see strix/tools/finish/tool.py's module docstring)."""
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+from strix.tools.coverage.tools import hydrate_coverage_from_disk
 from strix.tools.finish.tool import REQUIRED_COVERAGE_CATEGORIES, _do_finish
+
+
+@pytest.fixture(autouse=True)
+def _empty_coverage_ledger(tmp_path: Path) -> None:
+    hydrate_coverage_from_disk(tmp_path)
 
 
 def _full_checklist(**overrides: str) -> dict[str, str]:
@@ -104,8 +116,7 @@ def test_finish_rejects_a_checklist_note_that_ignores_baseline_findings(
     result = _finish(coverage_checklist=_full_checklist())
     assert result["success"] is False
     assert any(
-        "dependencies" in e and "3" in e and "baseline-scan finding" in e
-        for e in result["errors"]
+        "dependencies" in e and "3" in e and "baseline-scan finding" in e for e in result["errors"]
     )
 
 
@@ -128,7 +139,9 @@ class _FakeLiveUrlReportState(_FakeReportStateWithBaselineCounts):
     def __init__(self) -> None:
         super().__init__({})
         self.scan_config = {
-            "targets": [{"type": "web_application", "details": {"target_url": "https://app.example.com"}}]
+            "targets": [
+                {"type": "web_application", "details": {"target_url": "https://app.example.com"}}
+            ]
         }
 
 
@@ -159,6 +172,39 @@ def test_finish_accepts_live_http_when_the_scan_includes_a_url(
     assert result["success"] is True
 
 
+def test_finish_rejects_live_http_note_that_is_only_a_401(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "strix.report.state.get_global_report_state",
+        lambda: _FakeLiveUrlReportState(),
+    )
+    checklist = _full_checklist()
+    checklist["live_http"] = (
+        "All unauthenticated GET/POST/OPTIONS and initialize/tools/list "
+        "calls returned 401 Unauthorized; no credentials so testing stopped."
+    )
+    result = _finish(coverage_checklist=checklist)
+    assert result["success"] is False
+    assert any("recon-only" in e for e in result["errors"])
+
+
+def test_finish_accepts_live_http_note_that_continues_after_401(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "strix.report.state.get_global_report_state",
+        lambda: _FakeLiveUrlReportState(),
+    )
+    checklist = _full_checklist()
+    checklist["live_http"] = (
+        "Unauthenticated calls returned 401; continued with CORS/preflight, "
+        "empty Bearer bypass, sibling /health, and tools/call."
+    )
+    result = _finish(coverage_checklist=checklist)
+    assert result["success"] is True
+
+
 class _FakeRepoPlusUrlReportState(_FakeReportStateWithBaselineCounts):
     def __init__(self) -> None:
         super().__init__({})
@@ -174,6 +220,40 @@ class _FakeRepoPlusUrlReportState(_FakeReportStateWithBaselineCounts):
                 },
             ]
         }
+
+
+def test_finish_requires_detected_playbook_checklist_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakePlaybookState(_FakeReportStateWithBaselineCounts):
+        def __init__(self) -> None:
+            super().__init__({})
+            self.scan_config = {
+                "targets": [
+                    {
+                        "type": "repository",
+                        "details": {"cloned_repo_path": "/workspace/repo"},
+                    },
+                ],
+                "detected_surfaces": ["mcp"],
+                "required_playbooks": [
+                    {
+                        "skills": ["mcp_server"],
+                        "review_mode": "whitebox",
+                        "checklist_key": "mcp_server",
+                        "label": "MCP server (source)",
+                        "spawn_hint": "Read the handler.",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(
+        "strix.report.state.get_global_report_state",
+        _FakePlaybookState,
+    )
+    result = _finish()
+    assert result["success"] is False
+    assert any("mcp_server" in e for e in result["errors"])
 
 
 def test_finish_requires_live_http_for_a_combined_repo_and_url_scan(

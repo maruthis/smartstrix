@@ -8,10 +8,12 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..deps import current_org, current_user, db_dep
 from ..audit import record_audit as _record_audit
+from ..scan_quality import retest_instructions
 
 router = APIRouter(prefix="/api/issues", tags=["issues"])
 
 VALID_STATUSES = {"open", "in_progress", "snoozed", "fixed", "ignored"}
+VALID_DISPOSITIONS = {"pending", "confirmed", "rejected", "needs_repro", "out_of_scope"}
 
 
 def _serialize(i: models.Issue) -> dict:
@@ -38,6 +40,11 @@ def _serialize(i: models.Issue) -> dict:
         "endpoint": i.endpoint,
         "fix_effort": i.fix_effort,
         "source": i.source,
+        "disposition": i.disposition or "pending",
+        "disposition_note": i.disposition_note,
+        "file_path": i.file_path,
+        "line_number": i.line_number,
+        "specialist_name": i.specialist_name,
         "created_at": i.created_at.isoformat(),
         "updated_at": i.updated_at.isoformat(),
     }
@@ -141,3 +148,95 @@ def update_issue_status(
     db.commit()
     _record_audit(db, org.id, user.id, "issue.status_updated", issue.title, {"status": body.status})
     return _serialize(issue)
+
+
+class UpdateIssueDispositionIn(BaseModel):
+    disposition: str
+    note: str | None = None
+
+
+@router.patch("/{issue_id}/disposition")
+def update_issue_disposition(
+    issue_id: str,
+    body: UpdateIssueDispositionIn,
+    org: models.Organization = Depends(current_org),
+    user: models.User = Depends(current_user),
+    db: Session = Depends(db_dep),
+) -> dict:
+    if body.disposition not in VALID_DISPOSITIONS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="invalid_disposition")
+    if body.disposition != "pending" and not (body.note or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="disposition_note_required")
+    issue = db.get(models.Issue, issue_id)
+    if not issue or issue.org_id != org.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not_found")
+    issue.disposition = body.disposition
+    issue.disposition_note = (body.note or "").strip() or None
+    db.commit()
+    _record_audit(
+        db,
+        org.id,
+        user.id,
+        "issue.disposition_updated",
+        issue.title,
+        {"disposition": body.disposition},
+    )
+    return _serialize(issue)
+
+
+@router.post("/{issue_id}/retest")
+async def retest_issue(
+    issue_id: str,
+    org: models.Organization = Depends(current_org),
+    user: models.User = Depends(current_user),
+    db: Session = Depends(db_dep),
+) -> dict:
+    issue = db.get(models.Issue, issue_id)
+    if not issue or issue.org_id != org.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not_found")
+    parent = db.get(models.Pentest, issue.pentest_id) if issue.pentest_id else None
+    if parent is not None and parent.org_id == org.id:
+        target_type = parent.target_type
+        target_id = parent.target_id
+        extra_domain_id = parent.extra_domain_id
+        ref = parent.ref
+        skills = list(parent.skills or [])
+    elif issue.repository_id:
+        target_type = "repository"
+        target_id = issue.repository_id
+        extra_domain_id = None
+        ref = None
+        skills = None
+    elif issue.domain_id:
+        target_type = "domain"
+        target_id = issue.domain_id
+        extra_domain_id = None
+        ref = None
+        skills = None
+    else:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="retest_target_missing")
+
+    from .pentests import _serialize as serialize_pentest
+    from .pentests import create_and_enqueue_pentest
+
+    pentest = await create_and_enqueue_pentest(
+        db,
+        org,
+        user,
+        target_type,
+        target_id,
+        scan_mode="quick",
+        extra_domain_id=extra_domain_id,
+        ref=ref,
+        custom_instructions=retest_instructions(issue),
+        skills=skills,
+    )
+    _record_audit(
+        db,
+        org.id,
+        user.id,
+        "issue.retest_queued",
+        issue.title,
+        {"pentest_id": pentest.id, "issue_id": issue.id},
+    )
+    return serialize_pentest(pentest)

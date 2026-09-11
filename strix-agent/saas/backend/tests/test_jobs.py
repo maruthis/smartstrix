@@ -161,32 +161,28 @@ async def test_run_pentest_success_updates_repo_last_tested():
         db.close()
 
 
-async def test_scan_falls_back_to_mock_when_real_scan_unavailable():
+async def test_scan_does_not_mock_fallback_when_real_scan_unavailable(monkeypatch):
+    async def _boom(_db, _pentest, _llm_settings):
+        raise RuntimeError("clone failed")
+
+    monkeypatch.setattr(jobs.settings, "enable_real_scan", True)
+    monkeypatch.setattr(jobs, "_run_real_scan", _boom)
+
     db = SessionLocal()
     try:
-        jobs.settings.enable_real_scan = True
         org, repo = _make_org_and_repo(db)
         pentest = _make_pentest(db, org, repo)
-
-        # No GitHub/GitLab credential is connected and the repo doesn't
-        # exist, so _run_real_scan's clone step raises and _scan should
-        # fall back to the mock scanner rather than propagating that.
-        findings = await jobs._scan(db, pentest, None)
-        assert isinstance(findings, list)
-
-        # The fallback must be visible, not indistinguishable from a
-        # genuine result: the pentest records why, and every finding it
-        # filed is tagged.
-        assert pentest.mock_fallback_reason
-        assert all(f["source"] == "mock_fallback" for f in findings)
+        with pytest.raises(RuntimeError, match="clone failed"):
+            await jobs._scan(db, pentest, None)
+        assert pentest.mock_fallback_reason is None
     finally:
         jobs.settings.enable_real_scan = False
         db.close()
 
 
-async def test_scan_does_not_tag_findings_when_real_scan_disabled():
+async def test_scan_tags_intentional_mock_findings():
     """The *intended* mock scanner (SAAS_ENABLE_REAL_SCAN unset/false) is
-    not a fallback and must not be tagged as one."""
+    tagged `mock`, not `mock_fallback`."""
     db = SessionLocal()
     try:
         org, repo = _make_org_and_repo(db)
@@ -195,7 +191,7 @@ async def test_scan_does_not_tag_findings_when_real_scan_disabled():
         findings = await jobs._scan(db, pentest, None)
 
         assert pentest.mock_fallback_reason is None
-        assert all(f.get("source") is None for f in findings)
+        assert all(f.get("source") == "mock" for f in findings)
     finally:
         db.close()
 
@@ -318,7 +314,7 @@ async def test_run_real_scan_domain_target_has_no_local_sources(monkeypatch):
         org = models.Organization(name="DomainCo")
         db.add(org)
         db.flush()
-        domain = models.Domain(org_id=org.id, hostname="app.example.com")
+        domain = models.Domain(org_id=org.id, hostname="app.example.com", verified=True)
         db.add(domain)
         db.commit()
         pentest = models.Pentest(org_id=org.id, target_type="domain", target_id=domain.id, target_label=domain.hostname)
@@ -463,7 +459,10 @@ async def test_run_real_scan_reads_and_translates_real_findings(monkeypatch, tmp
             "target": "",
             "endpoint": "",
             "fix_effort": "medium",
-            "source": None,
+            "source": "agent",
+            "file_path": None,
+            "line_number": None,
+            "specialist_name": None,
         },
         {
             "title": "Missing field defaults",
@@ -477,9 +476,28 @@ async def test_run_real_scan_reads_and_translates_real_findings(monkeypatch, tmp
             "target": "",
             "endpoint": "/e",
             "fix_effort": "high",
-            "source": None,
+            "source": "agent",
+            "file_path": None,
+            "line_number": None,
+            "specialist_name": None,
         },
     ]
+
+
+def test_translate_real_finding_extracts_provenance():
+    raw = {
+        "title": "Bind 0.0.0.0",
+        "severity": "critical",
+        "source": "baseline_scan",
+        "target": "server.py",
+        "agent_name": "mcp-whitebox",
+        "code_locations": [{"file": "src/server.py", "line": 42}],
+    }
+    translated = jobs._translate_real_finding(raw)
+    assert translated["source"] == "baseline_scan"
+    assert translated["file_path"] == "src/server.py"
+    assert translated["line_number"] == 42
+    assert translated["specialist_name"] == "mcp-whitebox"
 
 
 async def test_run_real_scan_applies_and_restores_org_llm_env(monkeypatch):
@@ -733,9 +751,98 @@ async def test_run_pentest_end_to_end_with_real_scan_creates_issues_from_transla
         db.close()
 
 
-async def test_run_pentest_mock_findings_have_no_source(monkeypatch):
-    """MOCK_FINDINGS entries carry no "source" key at all — the Issue-creation
-    loop must default that to None rather than KeyError."""
+async def test_run_real_scan_raises_incomplete_when_run_json_is_not_completed(monkeypatch, tmp_path):
+    (tmp_path / "vulnerabilities.json").write_text(
+        json.dumps([{"title": "Partial finding", "severity": "high"}]),
+        encoding="utf-8",
+    )
+    (tmp_path / "run.json").write_text(json.dumps({"status": "failed"}), encoding="utf-8")
+
+    async def fake_run_strix_scan(*, scan_config, scan_id, image, local_sources):
+        return None
+
+    _install_fake_strix_module(monkeypatch, fake_run_strix_scan, run_dir=tmp_path)
+
+    db = SessionLocal()
+    try:
+        org, repo = _make_org_and_repo(db)
+        pentest = _make_pentest(db, org, repo)
+    finally:
+        db.close()
+
+    with pytest.raises(jobs.ScanIncompleteError) as exc_info:
+        await jobs._run_real_scan(db, pentest, None)
+    assert exc_info.value.findings[0]["title"] == "Partial finding"
+
+
+async def test_scan_does_not_mock_fallback_on_incomplete_real_scan(monkeypatch):
+    async def _incomplete(_db, _pentest, _llm_settings):
+        raise jobs.ScanIncompleteError(
+            "finish_scan missing",
+            findings=[{"title": "Real partial", "severity": "high", "description": "", "cvss": None, "cvss_breakdown": {}, "technical_analysis": "", "remediation_steps": "", "poc_description": "", "target": "x", "endpoint": "", "fix_effort": "low", "source": "baseline_scan"}],
+        )
+
+    monkeypatch.setattr(jobs.settings, "enable_real_scan", True)
+    monkeypatch.setattr(jobs, "_run_real_scan", _incomplete)
+
+    db = SessionLocal()
+    try:
+        org, repo = _make_org_and_repo(db)
+        pentest = _make_pentest(db, org, repo)
+        with pytest.raises(jobs.ScanIncompleteError):
+            await jobs._scan(db, pentest, None)
+        assert pentest.mock_fallback_reason is None
+    finally:
+        jobs.settings.enable_real_scan = False
+        db.close()
+
+
+async def test_run_pentest_persists_findings_but_marks_failed_when_incomplete(monkeypatch):
+    finding = {
+        "title": "Incomplete-run finding",
+        "description": "",
+        "severity": "critical",
+        "cvss": None,
+        "cvss_breakdown": {},
+        "technical_analysis": "",
+        "remediation_steps": "",
+        "poc_description": "",
+        "target": "app.py",
+        "endpoint": "",
+        "fix_effort": "low",
+        "source": "baseline_scan",
+    }
+
+    async def _incomplete(_db, _pentest, _llm_settings):
+        raise jobs.ScanIncompleteError("finish_scan missing", findings=[finding])
+
+    monkeypatch.setattr(jobs, "_scan", _incomplete)
+
+    db = SessionLocal()
+    try:
+        org, repo = _make_org_and_repo(db)
+        pentest = _make_pentest(db, org, repo)
+        pentest_id = pentest.id
+    finally:
+        db.close()
+
+    await jobs._run_pentest(pentest_id)
+
+    db = SessionLocal()
+    try:
+        reloaded = db.get(models.Pentest, pentest_id)
+        assert reloaded.status == "failed"
+        issues = db.query(models.Issue).filter_by(pentest_id=pentest_id).all()
+        assert len(issues) == 1
+        assert issues[0].title == "Incomplete-run finding"
+        assert reloaded.severity_counts["critical"] == 1
+        repo = db.get(models.Repository, reloaded.target_id)
+        assert repo.last_tested_at is None
+    finally:
+        db.close()
+
+
+async def test_run_pentest_mock_findings_are_tagged_mock(monkeypatch):
     db = SessionLocal()
     try:
         org, repo = _make_org_and_repo(db)
@@ -750,7 +857,11 @@ async def test_run_pentest_mock_findings_have_no_source(monkeypatch):
     try:
         issues = db.query(models.Issue).filter_by(pentest_id=pentest_id).all()
         assert issues
-        assert all(issue.source is None for issue in issues)
+        assert all(issue.source == "mock" for issue in issues)
+        assert all(issue.disposition == "pending" for issue in issues)
+        reloaded = db.get(models.Pentest, pentest_id)
+        assert reloaded.coverage["mode"] == "mock"
+        assert reloaded.coverage["finish_scan"] is False
     finally:
         db.close()
 

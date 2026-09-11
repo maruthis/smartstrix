@@ -206,6 +206,7 @@ def test_run_baseline_scan_never_raises_when_a_category_crashes(
     monkeypatch.setattr(baseline, "run_secret_baseline", lambda *_a, **_k: [])
     monkeypatch.setattr(baseline, "run_iac_baseline", lambda *_a, **_k: [])
     monkeypatch.setattr(baseline, "run_insecure_tls_baseline", lambda *_a, **_k: [])
+    monkeypatch.setattr(baseline, "run_mcp_source_baseline", lambda *_a, **_k: [])
 
     result = baseline.run_baseline_scan([{"source_path": str(tmp_path)}])
 
@@ -225,6 +226,7 @@ def test_run_baseline_scan_aggregates_across_categories(
     monkeypatch.setattr(baseline, "run_secret_baseline", lambda *_a, **_k: [secret_finding])
     monkeypatch.setattr(baseline, "run_iac_baseline", lambda *_a, **_k: [])
     monkeypatch.setattr(baseline, "run_insecure_tls_baseline", lambda *_a, **_k: [])
+    monkeypatch.setattr(baseline, "run_mcp_source_baseline", lambda *_a, **_k: [])
 
     result = baseline.run_baseline_scan([{"source_path": str(tmp_path)}])
 
@@ -254,3 +256,95 @@ def test_insecure_tls_baseline_ignores_comments(tmp_path: Path) -> None:
     (tmp_path / "client.py").write_text("# ssl=False is bad, do not copy\n")
     result = baseline.BaselineResult()
     assert baseline.run_insecure_tls_baseline([str(tmp_path)], result) == []
+
+
+def test_insecure_tls_baseline_skips_vendored_site_packages(tmp_path: Path) -> None:
+    client = tmp_path / "app" / "integrations" / "gitlab" / "client.py"
+    client.parent.mkdir(parents=True)
+    client.write_text("session = requests.Session(); session.verify = False\n")
+
+    vendored = (
+        tmp_path
+        / "Gitlab-mcpserver"
+        / "lib"
+        / "python3.11"
+        / "site-packages"
+        / "urllib3"
+        / "connection.py"
+    )
+    vendored.parent.mkdir(parents=True)
+    vendored.write_text("context.verify_mode = ssl.CERT_NONE\nssl=False\n")
+
+    result = baseline.BaselineResult()
+    findings = baseline.run_insecure_tls_baseline([str(tmp_path)], result)
+
+    assert len(findings) == 1
+    assert "client.py" in findings[0].target
+    assert "site-packages" not in findings[0].target
+
+
+def test_mcp_source_baseline_flags_bind_headers_readexactly_and_unwired_audit(
+    tmp_path: Path,
+) -> None:
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "run.py").write_text('uvicorn.run(app, host="0.0.0.0", port=8001)\n')
+    (app / "stateless_handler.py").write_text(
+        'logger.warning("incoming headers %s", request.headers)\n'
+    )
+    (app / "tcp.py").write_text("payload = await reader.readexactly(n)\n")
+    (app / "registry.py").write_text(
+        "def audit_tool_execution(name, args):\n    return None\n\n"
+        "def call_tool(name, args):\n    return tools[name](args)\n"
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_run.py").write_text('host="0.0.0.0"\n')
+
+    result = baseline.BaselineResult()
+    findings = baseline.run_mcp_source_baseline([str(tmp_path)], result)
+    titles = {f.title for f in findings}
+
+    assert "Service binds on all interfaces (0.0.0.0 / ::)" in titles
+    assert "HTTP request headers logged at runtime" in titles
+    assert "Unbounded TCP readexactly without a max size" in titles
+    assert "audit_tool_execution is defined but never called" in titles
+    assert all("tests/" not in f.target for f in findings)
+
+
+def test_mcp_source_baseline_flags_remaining_vapt_classes(tmp_path: Path) -> None:
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "server.py").write_text(
+        "async def handle_mcp_post(request):\n"
+        "    result = await self.handle_jsonrpc_request(payload)\n"
+        "    return {'error': str(exc)}\n"
+    )
+    (app / "register.py").write_text(
+        "class DeleteProjectTool:\n"
+        "    def __init__(self):\n"
+        "        self.name = 'delete_project'\n"
+        "        self.input_schema = {}\n"
+    )
+    (app / "client.py").write_text(
+        'url = f"{base}/projects/{project_id}/repository/files/{path}"\n'
+    )
+
+    result = baseline.BaselineResult()
+    findings = baseline.run_mcp_source_baseline([str(tmp_path)], result)
+    titles = {f.title for f in findings}
+
+    assert "MCP HTTP transport has no endpoint authentication" in titles
+    assert "MCP HTTP handler has no rate limiting" in titles
+    assert "Destructive MCP tools have no approval gate" in titles
+    assert "URL path segment interpolated without encoding" in titles
+    assert "Exception text returned to MCP/API clients" in titles
+
+
+def test_mcp_source_baseline_skips_wired_audit(tmp_path: Path) -> None:
+    (tmp_path / "registry.py").write_text(
+        "def audit_tool_execution(name, args):\n    return None\n\n"
+        "def call_tool(name, args):\n    audit_tool_execution(name, args)\n"
+    )
+    result = baseline.BaselineResult()
+    findings = baseline.run_mcp_source_baseline([str(tmp_path)], result)
+    assert all("audit_tool_execution" not in f.title for f in findings)

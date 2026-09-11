@@ -2,7 +2,7 @@
   "run_id": "scan-ext",
   "run_name": "scan-ext",
   "start_time": "2026-08-26T06:55:57.073122+00:00",
-  "end_time": "2026-09-10T12:23:06.423085+00:00",
+  "end_time": "2026-09-10T17:08:32.485124+00:00",
   "status": "stopped",
   "auth_mode": "api_key",
   "targets_info": [],
@@ -34,5 +34,7 @@
   "non_interactive": false,
   "local_sources": [],
   "scope_mode": "auto",
-  "diff_base": null
+  "diff_base": null,
+  "detected_surfaces": [],
+  "required_playbooks": []
 }

@@ -28,7 +28,7 @@ Load `llm_applications` as the architecture playbook. This map is the **mandator
 
 ## Spawn rules
 
-- If the tree calls OpenAI/Anthropic/LiteLLM/LangChain/Bedrock/Vertex or stores embeddings, **every row with surface is mandatory** — do not skip LLM02/LLM04 because recon ranked injection higher
+- If the tree calls OpenAI/Anthropic/LiteLLM/LangChain/Bedrock/Vertex or stores embeddings, **every row with surface is mandatory** — do not skip LLM02/LLM04 because recon ranked injection higher. `finish_scan` requires white-box `llm_prompt_injection`, `llm_applications`, and `ai_ml_governance` children (`review_mode='whitebox'`)
 - LLM02 includes **data in transit to the provider** (prompts, tools, logs, `store=True`, training opt-in), not only the chat UI leaking another user's thread
 - LLM03: if there are no tools/MCP/function-calls, record that and skip the agency specialist; do not skip LLM02
 - Pair with `standards/owasp_agentic_top_10` when the app can select tools or delegate to other agents

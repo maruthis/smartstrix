@@ -22,15 +22,13 @@ Two scan backends:
   findings are read back from that run's `vulnerabilities.json` and
   translated into the same shape `MOCK_FINDINGS` already uses, so the rest
   of the pipeline (Issue creation, severity counting) doesn't need a
-  real-vs-mock branch. Falls back to the mock scanner with a logged
-  warning if the real engine raises (e.g. Docker/LLM credentials missing,
-  or cloning fails) — the resulting findings and the Pentest row are both
-  tagged so the fallback is visible rather than indistinguishable from a
-  genuine result (`Pentest.mock_fallback_reason`, `Issue.source ==
-  "mock_fallback"`) — so the job queue never gets stuck. Uses the target
-  org's `OrgLlmSettings` (model/key/base) if configured, applied via
-  process env vars right before the call, under `_llm_env_lock` — see
-  `_run_real_scan`'s docstring for why that lock exists.
+  real-vs-mock branch. If the real engine raises (Docker/LLM missing,
+  clone failure, incomplete finish_scan) the pentest is marked failed
+  and no canned findings are substituted — a failed real scan must never
+  look completed. Uses the target org's `OrgLlmSettings` (model/key/base)
+  if configured, applied via process env vars right before the call,
+  under `_llm_env_lock` — see `_run_real_scan`'s docstring for why that
+  lock exists.
 """
 
 from __future__ import annotations
@@ -43,18 +41,29 @@ import random
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import uuid
 from pathlib import Path
 
 from . import crypto, models
 from .audit import record_audit
+from .coverage_summary import MOCK_COVERAGE, empty_real_coverage, read_coverage_summary
 from .db import SessionLocal
 from .public_hosts import live_https_url
+from .secret_text import redact_secret_shaped_text
 from .settings import settings
 from .standard_skills import to_engine_skills
 from .time_utils import utcnow
 from .webhook_delivery import deliver_event
+
+
+class ScanIncompleteError(RuntimeError):
+    """Real engine finished without finish_scan. ``findings`` may still be real."""
+
+    def __init__(self, message: str, *, findings: list[dict] | None = None) -> None:
+        super().__init__(message)
+        self.findings = list(findings or [])
 
 logger = logging.getLogger("saas.jobs")
 
@@ -143,7 +152,17 @@ async def _run_pentest(pentest_id: str) -> None:
         # rows, so a mid-loop exception discards them along with the
         # attempt, which is what we want (no partial finding sets).
         try:
-            findings = await _scan(db, pentest, llm_settings)
+            try:
+                findings = await _scan(db, pentest, llm_settings)
+                terminal_status = "completed"
+                audit_event = "pentest.completed"
+                webhook_event = "pentest.completed"
+            except ScanIncompleteError as exc:
+                logger.warning("scan incomplete for pentest %s: %s", pentest.id, exc)
+                findings = exc.findings
+                terminal_status = "failed"
+                audit_event = "pentest.failed"
+                webhook_event = "pentest.failed"
 
             severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
             issue_events: list[dict] = []
@@ -155,18 +174,7 @@ async def _run_pentest(pentest_id: str) -> None:
                         pentest_id=pentest.id,
                         repository_id=pentest.target_id if pentest.target_type == "repository" else None,
                         domain_id=pentest.target_id if pentest.target_type == "domain" else None,
-                        title=finding["title"],
-                        description=finding["description"],
-                        severity=finding["severity"],
-                        cvss=finding["cvss"],
-                        cvss_breakdown=finding["cvss_breakdown"],
-                        technical_analysis=finding["technical_analysis"],
-                        remediation_steps=finding["remediation_steps"],
-                        poc_description=finding["poc_description"],
-                        target=finding["target"],
-                        endpoint=finding["endpoint"],
-                        fix_effort=finding["fix_effort"],
-                        source=finding.get("source"),
+                        **_issue_fields_from_finding(finding),
                     )
                 )
                 issue_events.append(
@@ -179,18 +187,20 @@ async def _run_pentest(pentest_id: str) -> None:
                     }
                 )
 
-            pentest.status = "completed"
+            pentest.status = terminal_status
             pentest.finished_at = utcnow()
             pentest.severity_counts = severity_counts
+            pentest.coverage = _coverage_for_pentest(pentest, finish_scan=terminal_status == "completed")
 
-            if pentest.target_type == "repository":
-                repo = db.get(models.Repository, pentest.target_id)
-                if repo:
-                    repo.last_tested_at = pentest.finished_at
-            elif pentest.target_type == "domain":
-                domain = db.get(models.Domain, pentest.target_id)
-                if domain:
-                    domain.last_tested_at = pentest.finished_at
+            if terminal_status == "completed":
+                if pentest.target_type == "repository":
+                    repo = db.get(models.Repository, pentest.target_id)
+                    if repo:
+                        repo.last_tested_at = pentest.finished_at
+                elif pentest.target_type == "domain":
+                    domain = db.get(models.Domain, pentest.target_id)
+                    if domain:
+                        domain.last_tested_at = pentest.finished_at
 
             db.commit()
             llm_usage = _llm_usage_payload(
@@ -201,12 +211,14 @@ async def _run_pentest(pentest_id: str) -> None:
             audit_extra = {"severity_counts": severity_counts, "llm_usage": llm_usage}
             if pentest.mock_fallback_reason:
                 audit_extra["mock_fallback_reason"] = pentest.mock_fallback_reason
-            record_audit(db, pentest.org_id, pentest.created_by, "pentest.completed", pentest.target_label, audit_extra)
+            if terminal_status != "completed":
+                audit_extra["incomplete"] = True
+            record_audit(db, pentest.org_id, pentest.created_by, audit_event, pentest.target_label, audit_extra)
             for issue_event in issue_events:
                 await _deliver_webhook_event(pentest.org_id, "issue.created", issue_event)
             await _deliver_webhook_event(
                 pentest.org_id,
-                "pentest.completed",
+                webhook_event,
                 {
                     "pentest_id": pentest.id,
                     "target_type": pentest.target_type,
@@ -242,21 +254,11 @@ async def _deliver_webhook_event(org_id: str, event: str, payload: dict) -> None
 
 async def _scan(db, pentest: models.Pentest, llm_settings: models.OrgLlmSettings | None) -> list[dict]:
     if settings.enable_real_scan:
-        try:
-            return await _run_real_scan(db, pentest, llm_settings)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("real scan failed for pentest %s, falling back to mock scanner", pentest.id)
-            # Tag the pentest and every finding it files below as a
-            # fallback result — without this, a real-scan failure (expired
-            # LLM key, Docker down, clone failure) produces a report that's
-            # byte-for-byte indistinguishable from a genuine clean/found
-            # result, both to the customer and in the audit trail.
-            pentest.mock_fallback_reason = f"{type(exc).__name__}: {exc}"[:500]
-            findings = await _run_mock_scan(pentest)
-            for finding in findings:
-                finding["source"] = "mock_fallback"
-            return findings
-    return await _run_mock_scan(pentest)
+        return await _run_real_scan(db, pentest, llm_settings)
+    findings = await _run_mock_scan(pentest)
+    for finding in findings:
+        finding["source"] = "mock"
+    return findings
 
 
 _LLM_ENV_KEYS = ("STRIX_LLM", "LLM_API_KEY", "LLM_API_BASE")
@@ -288,6 +290,38 @@ def _int_or_zero(value: object) -> int:
         return max(0, int(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _read_run_record_status(scan_id: str) -> str | None:
+    from strix.core.paths import run_dir_for, run_record_path
+
+    path = run_record_path(run_dir_for(scan_id))
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - missing/corrupt run.json is treated as unknown
+        return None
+    if not isinstance(data, dict):
+        return None
+    status = data.get("status")
+    return status if isinstance(status, str) and status else None
+
+
+def _read_translated_findings(scan_id: str) -> list[dict]:
+    from strix.core.paths import run_dir_for
+
+    vulnerabilities_path = run_dir_for(scan_id) / "vulnerabilities.json"
+    if not vulnerabilities_path.exists():
+        return []
+    try:
+        raw_findings = json.loads(vulnerabilities_path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - unreadable artifacts still fail the pentest honestly
+        logger.exception("could not read findings for run %s", scan_id)
+        return []
+    if not isinstance(raw_findings, list):
+        return []
+    return [_translate_real_finding(f) for f in raw_findings if isinstance(f, dict)]
 
 
 def _read_llm_usage_for_run(scan_id: str) -> dict[str, int]:
@@ -415,6 +449,8 @@ async def _build_scan_targets(db, pentest: models.Pentest) -> tuple[list[dict], 
             extra_domain = db.get(models.Domain, pentest.extra_domain_id)
             if extra_domain is None:
                 raise RuntimeError(f"extra domain {pentest.extra_domain_id} not found")
+            if not extra_domain.verified:
+                raise RuntimeError(f"extra domain {pentest.extra_domain_id} is not verified")
             targets.append(
                 {
                     "type": "web_application",
@@ -428,6 +464,8 @@ async def _build_scan_targets(db, pentest: models.Pentest) -> tuple[list[dict], 
         domain = db.get(models.Domain, pentest.target_id)
         if domain is None:
             raise RuntimeError(f"domain {pentest.target_id} not found")
+        if not domain.verified:
+            raise RuntimeError(f"domain {pentest.target_id} is not verified")
         targets = [{"type": "web_application", "details": {"target_url": live_https_url(domain.hostname)}}]
         return targets, []
 
@@ -440,6 +478,10 @@ def _translate_real_finding(raw: dict) -> dict:
     only added when truthy, so many are simply absent) into the fully
     populated shape `_run_pentest` expects, matching `MOCK_FINDINGS`'
     shape below so the rest of the pipeline needs no real-vs-mock branch."""
+    file_path, line_number = _location_from_raw_finding(raw)
+    source = raw.get("source")
+    if source not in {"baseline_scan", "mock", "mock_fallback"}:
+        source = "agent"
     return {
         "title": raw.get("title") or "Untitled finding",
         "description": raw.get("description") or "",
@@ -452,10 +494,79 @@ def _translate_real_finding(raw: dict) -> dict:
         "target": raw.get("target") or "",
         "endpoint": raw.get("endpoint") or "",
         "fix_effort": raw.get("fix_effort") or "medium",
-        # "baseline_scan" for a Tier 3 deterministic finding (see
-        # strix/scan/baseline.py); absent/None for everything an agent filed.
-        "source": raw.get("source"),
+        "source": source,
+        "file_path": file_path,
+        "line_number": line_number,
+        "specialist_name": raw.get("agent_name") or None,
     }
+
+
+def _location_from_raw_finding(raw: dict) -> tuple[str | None, int | None]:
+    locations = raw.get("code_locations")
+    if isinstance(locations, list):
+        for item in locations:
+            if not isinstance(item, dict):
+                continue
+            path = item.get("file") or item.get("path") or item.get("file_path")
+            line = item.get("line") or item.get("start_line") or item.get("line_start")
+            if path:
+                return str(path), _optional_int(line)
+    target = raw.get("target")
+    if isinstance(target, str) and _looks_like_file_path(target):
+        return target, None
+    return None, None
+
+
+def _looks_like_file_path(value: str) -> bool:
+    if "/" in value or "\\" in value:
+        return True
+    return value.endswith((".py", ".ts", ".tsx", ".js", ".go", ".rb", ".java", ".kt", ".rs"))
+
+
+def _optional_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def _issue_fields_from_finding(finding: dict) -> dict:
+    source = finding.get("source") or "agent"
+    return {
+        "title": finding["title"],
+        "description": finding["description"],
+        "severity": finding["severity"],
+        "cvss": finding["cvss"],
+        "cvss_breakdown": finding["cvss_breakdown"],
+        "technical_analysis": finding["technical_analysis"],
+        "remediation_steps": finding["remediation_steps"],
+        "poc_description": finding["poc_description"],
+        "target": finding["target"],
+        "endpoint": finding["endpoint"],
+        "fix_effort": finding["fix_effort"],
+        "source": source,
+        "disposition": "pending",
+        "file_path": finding.get("file_path"),
+        "line_number": finding.get("line_number"),
+        "specialist_name": finding.get("specialist_name"),
+    }
+
+
+def _coverage_for_pentest(pentest: models.Pentest, *, finish_scan: bool) -> dict:
+    if not settings.enable_real_scan:
+        return dict(MOCK_COVERAGE)
+    from strix.core.paths import run_dir_for
+
+    summary = read_coverage_summary(run_dir_for(pentest.id), finish_scan=finish_scan)
+    if summary is None:
+        return empty_real_coverage(finish_scan=finish_scan)
+    summary["finish_scan"] = finish_scan
+    if not finish_scan:
+        summary["complete"] = False
+    return summary
 
 
 async def _run_real_scan(db, pentest: models.Pentest, llm_settings: models.OrgLlmSettings | None) -> list[dict]:
@@ -486,7 +597,6 @@ async def _run_real_scan(db, pentest: models.Pentest, llm_settings: models.OrgLl
     async with _llm_env_lock:
         from strix.config import load_settings
         from strix.config import loader as strix_config_loader
-        from strix.core.paths import run_dir_for
         from strix.core.runner import run_strix_scan  # lazy import: optional dependency
 
         override_active = bool(llm_settings and llm_settings.model)
@@ -511,24 +621,31 @@ async def _run_real_scan(db, pentest: models.Pentest, llm_settings: models.OrgLl
                 "targets": targets,
                 "run_name": pentest.id,
                 "scan_mode": pentest.scan_mode,
-                "user_instructions": pentest.custom_instructions or "",
+                "user_instructions": redact_secret_shaped_text(pentest.custom_instructions),
                 "skills": to_engine_skills(pentest.skills),
             }
-            await run_strix_scan(
-                scan_config=scan_config,
-                scan_id=pentest.id,
-                image=load_settings().runtime.image,
-                local_sources=local_sources,
-            )
+            incomplete_message = None
+            engine_incomplete = getattr(sys.modules.get("strix.core.runner"), "ScanIncompleteError", ())
+            try:
+                await run_strix_scan(
+                    scan_config=scan_config,
+                    scan_id=pentest.id,
+                    image=load_settings().runtime.image,
+                    local_sources=local_sources,
+                )
+            except engine_incomplete as exc:
+                incomplete_message = str(exc)
             _store_pentest_llm_usage(pentest, _read_llm_usage_for_run(pentest.id))
 
-            vulnerabilities_path = run_dir_for(pentest.id) / "vulnerabilities.json"
-            if not vulnerabilities_path.exists():
-                return []
-            raw_findings = json.loads(vulnerabilities_path.read_text(encoding="utf-8"))
-            if not isinstance(raw_findings, list):
-                return []
-            return [_translate_real_finding(f) for f in raw_findings if isinstance(f, dict)]
+            findings = _read_translated_findings(pentest.id)
+            run_status = _read_run_record_status(pentest.id)
+            if incomplete_message or run_status in {"failed", "stopped", "interrupted"}:
+                raise ScanIncompleteError(
+                    incomplete_message
+                    or f"Scan ended with status {run_status!r} without finish_scan",
+                    findings=findings,
+                )
+            return findings
         finally:
             if override_active and previous_env is not None:
                 for key, value in previous_env.items():
@@ -623,7 +740,6 @@ async def _run_real_pr_review_scan(
     async with _llm_env_lock:
         from strix.config import load_settings
         from strix.config import loader as strix_config_loader
-        from strix.core.paths import run_dir_for
         from strix.core.runner import run_strix_scan  # lazy import: optional dependency
         from strix.interface.utils import resolve_diff_scope_context
 
@@ -676,21 +792,28 @@ async def _run_real_pr_review_scan(
                 "scan_mode": "quick",
                 "diff_scope": diff_scope.metadata,
             }
-            await run_strix_scan(
-                scan_config=scan_config,
-                scan_id=review.id,
-                image=load_settings().runtime.image,
-                local_sources=local_sources,
-            )
+            incomplete_message = None
+            engine_incomplete = getattr(sys.modules.get("strix.core.runner"), "ScanIncompleteError", ())
+            try:
+                await run_strix_scan(
+                    scan_config=scan_config,
+                    scan_id=review.id,
+                    image=load_settings().runtime.image,
+                    local_sources=local_sources,
+                )
+            except engine_incomplete as exc:
+                incomplete_message = str(exc)
             _store_pr_review_llm_usage(review, _read_llm_usage_for_run(review.id))
 
-            vulnerabilities_path = run_dir_for(review.id) / "vulnerabilities.json"
-            if not vulnerabilities_path.exists():
-                return []
-            raw_findings = json.loads(vulnerabilities_path.read_text(encoding="utf-8"))
-            if not isinstance(raw_findings, list):
-                return []
-            return [_translate_real_finding(f) for f in raw_findings if isinstance(f, dict)]
+            findings = _read_translated_findings(review.id)
+            run_status = _read_run_record_status(review.id)
+            if incomplete_message or run_status in {"failed", "stopped", "interrupted"}:
+                raise ScanIncompleteError(
+                    incomplete_message
+                    or f"Scan ended with status {run_status!r} without finish_scan",
+                    findings=findings,
+                )
+            return findings
         finally:
             if override_active and previous_env is not None:
                 for key, value in previous_env.items():
@@ -722,8 +845,14 @@ async def _run_pr_review_job(review_id: str) -> None:
 
         llm_settings = db.get(models.OrgLlmSettings, review.org_id)
 
+        scan_incomplete = False
         try:
             findings = await _run_real_pr_review_scan(db, review, repo, llm_settings)
+        except ScanIncompleteError as exc:
+            logger.warning("PR review %s incomplete: %s", review.id, exc)
+            findings = exc.findings
+            review.error = "scan_incomplete"
+            scan_incomplete = True
         except Exception:  # noqa: BLE001 - a broken PR review must not kill the worker
             logger.exception("real scan failed for PR review %s", review.id)
             db.rollback()
@@ -740,23 +869,14 @@ async def _run_pr_review_job(review_id: str) -> None:
 
         issue_events: list[dict] = []
         for finding in findings:
+            fields = _issue_fields_from_finding(finding)
+            fields["target"] = repo.full_name
             db.add(
                 models.Issue(
                     org_id=review.org_id,
                     pr_review_id=review.id,
                     repository_id=repo.id,
-                    title=finding["title"],
-                    description=finding["description"],
-                    severity=finding["severity"],
-                    cvss=finding["cvss"],
-                    cvss_breakdown=finding["cvss_breakdown"],
-                    technical_analysis=finding["technical_analysis"],
-                    remediation_steps=finding["remediation_steps"],
-                    poc_description=finding["poc_description"],
-                    target=repo.full_name,
-                    endpoint=finding["endpoint"],
-                    fix_effort=finding["fix_effort"],
-                    source=finding.get("source"),
+                    **fields,
                 )
             )
             issue_events.append(
@@ -773,7 +893,9 @@ async def _run_pr_review_job(review_id: str) -> None:
 
         blocking_severities, block_prs_on_findings = _pr_review_blocking_severities(db, review.org_id)
         blocking = any(f["severity"] in blocking_severities for f in findings)
-        if not findings:
+        if scan_incomplete:
+            review.status = "failed"
+        elif not findings:
             review.status = "passed"
         elif block_prs_on_findings and blocking:
             review.status = "needs_attention"

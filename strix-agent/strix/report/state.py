@@ -467,6 +467,8 @@ class ReportState:
                 "local_sources": config.get("local_sources", []),
                 "scope_mode": config.get("scope_mode", "auto"),
                 "diff_base": config.get("diff_base"),
+                "detected_surfaces": config.get("detected_surfaces") or [],
+                "required_playbooks": config.get("required_playbooks") or [],
             }
         )
 

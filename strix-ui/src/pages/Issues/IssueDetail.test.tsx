@@ -84,7 +84,7 @@ describe("IssueDetail", () => {
     });
     renderWithProviders(<IssueDetail />, { route: "/issues/i1", path: "/issues/:id" });
     await screen.findByText("SQL injection in search");
-    await userEvent.selectOptions(screen.getByRole("combobox"), "Fixed");
+    await userEvent.selectOptions(screen.getByDisplayValue("Open"), "Fixed");
   });
 
   it("navigates back when the back button is clicked", async () => {
@@ -108,10 +108,31 @@ describe("IssueDetail", () => {
     expect(screen.getByText("Mock fallback")).toBeInTheDocument();
   });
 
-  it("omits the badge for an agent-validated finding", async () => {
+  it("shows a Demo scanner badge for mock findings", async () => {
+    mockFetchImpl(async () => jsonRes({ ...ISSUE, source: "mock" }));
+    renderWithProviders(<IssueDetail />, { route: "/issues/i1", path: "/issues/:id" });
+    await screen.findByText("SQL injection in search");
+    expect(screen.getAllByText("Demo scanner").length).toBeGreaterThan(0);
+  });
+
+  it("queues a retest and navigates to the new pentest", async () => {
+    mockFetchImpl(async (url, init) => {
+      if (init?.method === "POST" && String(url).includes("/retest")) {
+        return jsonRes({ id: "pt-retest", status: "queued", target_label: "acme/widgets" });
+      }
+      return jsonRes(ISSUE);
+    });
+    renderWithProviders(<IssueDetail />, { route: "/issues/i1", path: "/issues/:id" });
+    await screen.findByText("SQL injection in search");
+    await userEvent.click(screen.getByRole("button", { name: /Retest this finding/ }));
+    await screen.findByTestId("test-route-fallback");
+  });
+
+  it("omits scanner badges for an agent-validated finding", async () => {
     mockFetchImpl(async () => jsonRes({ ...ISSUE, source: null }));
     renderWithProviders(<IssueDetail />, { route: "/issues/i1", path: "/issues/:id" });
     await screen.findByText("SQL injection in search");
     expect(screen.queryByText("Automatically detected")).not.toBeInTheDocument();
+    expect(screen.queryByText("Demo scanner")).not.toBeInTheDocument();
   });
 });

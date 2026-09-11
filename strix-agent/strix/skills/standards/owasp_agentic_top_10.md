@@ -28,7 +28,7 @@ This is not a duplicate of `owasp_llm_top_10`. LLM01 is instruction/data confusi
 
 ## Spawn rules
 
-- Load this map when the tree has tool/function calling, MCP, LangGraph/Crew/AutoGen, or an agent loop — not for a single-turn chat wrapper with no tools
+- Load this map when the tree has tool/function calling, MCP, LangGraph/Crew/AutoGen, or an agent loop — not for a single-turn chat wrapper with no tools. `finish_scan` requires a white-box `agentic_system_security` child; live HTTP recon does not satisfy it
 - ASI02: start with **read-only** tool calls; do not prove missing confirmation by deleting production data
 - ASI05: code-interpreter / `eval` / shell tools are in scope even when sandboxed — record the sandbox boundary
 - ASI10: test kill switches, max-turn/budget stops, and whether the agent can disable its own policy. A sci-fi write-up without a reachable control is not a finding

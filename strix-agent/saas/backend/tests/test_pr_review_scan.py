@@ -292,7 +292,10 @@ async def test_run_real_pr_review_scan_reads_and_translates_findings(monkeypatch
             "target": "",
             "endpoint": "",
             "fix_effort": "medium",
-            "source": None,
+            "source": "agent",
+            "file_path": None,
+            "line_number": None,
+            "specialist_name": None,
         }
     ]
 

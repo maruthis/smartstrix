@@ -7,6 +7,8 @@ description: Testable AI/ML governance — model identity pinning, provider data
 
 Use this when the target sends data to a model provider, hosts a model, retrieves embeddings, logs prompts, or claims safety/guardrails. Pair with `llm_applications` (OWASP LLM01–LLM10 architecture) and `information_disclosure` for concrete leaks.
 
+Required playbook: white-box review of provider calls, prompt logs, and fail-closed guardrails. Live 401/CORS does not close this class.
+
 This skill is **not** an ISO 42001/NIST AI RMF audit of the organization. Do not invent findings from missing ethics-board minutes, model-card PDFs, or vendor DPAs you cannot observe. Only report controls that are missing, fail-open, or contradicted **in the running system or source**.
 
 ## What “governance” means here

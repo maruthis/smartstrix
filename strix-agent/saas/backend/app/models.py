@@ -197,14 +197,14 @@ class Pentest(TimestampMixin, Base):
     # "user_instructions" (see strix/core/inputs.py's build_root_task).
     # None/empty for a normal New Pentest, which has no such input.
     custom_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Set (a short reason string) only when SAAS_ENABLE_REAL_SCAN=1 and the
-    # real engine raised, causing app/jobs.py's _scan() to fall back to the
-    # mock scanner — null for a normal completed real scan, and null for a
-    # pentest that was always mock (real scan disabled). Surfaced in the UI
-    # and audit trail so a fallback result is never indistinguishable from
-    # a genuine one; see also Issue.source == "mock_fallback" on this
-    # pentest's findings.
+    # Historical: set when SAAS_ENABLE_REAL_SCAN=1 and the real engine
+    # raised, causing an older _scan() to substitute canned findings.
+    # New real-scan failures fail closed instead. Null for a genuine
+    # completed real scan and for an intentional mock (real scan off).
     mock_fallback_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Compact coverage / agent-graph summary persisted after a scan so the
+    # UI can lead with what was not tested. See app/coverage_summary.py.
+    coverage: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 # --------------------------------------------------------------------------
@@ -237,12 +237,17 @@ class Issue(TimestampMixin, Base):
     target: Mapped[str] = mapped_column(String, default="")
     endpoint: Mapped[str] = mapped_column(String, default="")
     fix_effort: Mapped[str] = mapped_column(String, default="medium")  # low|medium|high
-    # "baseline_scan" for a Tier 3 deterministic finding (trivy/gitleaks/kube-linter,
-    # filed before the agent loop starts); "mock_fallback" when this finding
-    # is a canned MockScanner result filed because the real engine raised
-    # (see Pentest.mock_fallback_reason on the parent pentest); None/
-    # "agent_validated" for everything else.
+    # "baseline_scan" for a Tier 3 deterministic finding; "agent" for an
+    # LLM-filed finding; "mock" for the intentional demo scanner;
+    # "mock_fallback" only on historical rows from the old fail-open path.
     source: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Human triage of the assistant's claim. Independent of workflow
+    # status (open/fixed): a finding can be open and still rejected.
+    disposition: Mapped[str] = mapped_column(String, default="pending")  # pending|confirmed|rejected|needs_repro|out_of_scope
+    disposition_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    line_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    specialist_name: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 

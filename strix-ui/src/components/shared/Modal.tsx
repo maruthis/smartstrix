@@ -8,6 +8,7 @@ export function Modal({
   title,
   description,
   children,
+  footer,
   width = "max-w-lg",
 }: {
   open: boolean;
@@ -15,6 +16,7 @@ export function Modal({
   title: string;
   description?: string;
   children: ReactNode;
+  footer?: ReactNode;
   width?: string;
 }) {
   const titleId = useId();
@@ -60,26 +62,35 @@ export function Modal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 fade-in" onClick={onClose} onKeyDown={onKeyDown}>
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={description ? descriptionId : undefined}
-        className={`w-full ${width} rounded-xl border border-[#2a2a2a] bg-[#0a0a0a] p-6 shadow-2xl`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-start justify-between">
-          <div>
-            <h2 id={titleId} className="text-base font-semibold text-white">{title}</h2>
-            {description && <p id={descriptionId} className="mt-1 text-sm text-[#888]">{description}</p>}
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/70 p-4 fade-in"
+      onClick={onClose}
+      onKeyDown={onKeyDown}
+    >
+      <div className="flex min-h-[calc(100dvh-2rem)] items-center justify-center">
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          aria-describedby={description ? descriptionId : undefined}
+          className={`flex max-h-[calc(100dvh-2rem)] min-h-0 w-full ${width} flex-col overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#0a0a0a] shadow-2xl`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="mb-0 flex shrink-0 items-start justify-between px-6 pt-6">
+            <div>
+              <h2 id={titleId} className="text-base font-semibold text-white">{title}</h2>
+              {description && <p id={descriptionId} className="mt-1 text-sm text-[#888]">{description}</p>}
+            </div>
+            <button type="button" aria-label="Close dialog" onClick={onClose} className="rounded-md p-1 text-[#888] hover:bg-[rgba(255,255,255,0.08)] hover:text-white">
+              <X size={16} />
+            </button>
           </div>
-          <button type="button" aria-label="Close dialog" onClick={onClose} className="rounded-md p-1 text-[#888] hover:bg-[rgba(255,255,255,0.08)] hover:text-white">
-            <X size={16} />
-          </button>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-6 pt-4">
+            {children}
+          </div>
+          {footer ? <div className="shrink-0 border-t border-[#222] px-6 py-4">{footer}</div> : null}
         </div>
-        {children}
       </div>
     </div>
   );

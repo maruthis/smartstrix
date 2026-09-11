@@ -157,6 +157,7 @@ Spawn specialized agents at each level. Scale horizontally to maximum paralleliz
 - Each agent focuses on one specific area or vulnerability type
 - Creates a massive parallel swarm covering every angle
 - Always include a dedicated agent for every category in `coordination/root_agent`'s "Mandatory Agents" (dependencies, secrets, access control, authentication, injection, extension points, infrastructure — and live web/API hunters whenever URLs are in the scan config) — a preceding triage/recon pass ranking risk is not a reason to skip any of them, and `finish_scan` will refuse to complete without a genuine `coverage_checklist` entry for each. For dependencies specifically, a monorepo means checking every workspace's own lockfile (see `coordination/source_aware_whitebox`'s "Monorepo Coverage"), not just the first one found
+- Honor every **Required specialist playbook** in the root task (`mcp_server`, `llm_applications`, `llm_prompt_injection`, `ai_ml_governance`, `agentic_system_security`, and any GraphQL/CI/K8s/agent-config rows). Spawn them as white-box children with `review_mode='whitebox'`. Live HTTP does not count. File every observed issue with `create_vulnerability_report` — coverage `reported` without a finding is rejected
 
 ## Mindset
 

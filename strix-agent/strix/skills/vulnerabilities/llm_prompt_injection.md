@@ -11,6 +11,8 @@ Load `llm_applications` for the full OWASP 2026 LLM01-LLM10 architecture and cov
 
 When the system can invoke MCP servers, plugins, skills, delegated agents, or consequential tools, also load `agentic_system_security` to model effective authority, target-side authorization, executable component supply chain, and repeatable safety regression. This skill remains focused on instruction/data confusion and unsafe model output.
 
+A required `llm_prompt_injection` playbook is **white-box first**: trace untrusted strings into model calls in source. A live 401 or CORS agent does not close this class.
+
 ## Attack Surface
 
 **Direct Injection**

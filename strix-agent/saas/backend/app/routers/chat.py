@@ -196,9 +196,19 @@ async def _run_chat_turn(
 
     started: list[tuple[str, str]] = []
     for repo in repos:
-        pentest = await create_and_enqueue_pentest(
-            db, org, user, "repository", repo.id, scan_mode="quick", custom_instructions=body.content.strip()
-        )
+        try:
+            pentest = await create_and_enqueue_pentest(
+                db, org, user, "repository", repo.id, scan_mode="quick", custom_instructions=body.content.strip()
+            )
+        except HTTPException as exc:
+            if exc.detail == "credentials_not_allowed":
+                return (
+                    "I can't start a scan from a message that looks like it contains live "
+                    "credentials (tokens, Bearer headers, cookies, or API keys). Remove those "
+                    "and send the request again — paste secrets into the authorized live-target "
+                    "settings, not into chat."
+                )
+            raise
         started.append((repo.full_name, pentest.id))
 
     context_note = (

@@ -52,6 +52,7 @@ from strix.report.state import (
 )
 from strix.runtime import session_manager
 from strix.scan.baseline import run_baseline_scan
+from strix.scan.playbooks import attach_required_playbooks
 from strix.scan.surface_detect import ensure_detected_standard_skills
 from strix.telemetry.logging import set_scan_id, setup_scan_logging
 from strix.tools.output_store import (
@@ -71,6 +72,60 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+class ScanIncompleteError(RuntimeError):
+    """Headless scan ended without ``finish_scan``.
+
+    The run is not a completed pentest. Artifacts that were already filed
+    (baseline findings, agent reports) remain on disk; callers must treat
+    the job as failed, not clean.
+    """
+
+
+async def _mark_headless_scan_incomplete(
+    *,
+    scan_id: str,
+    result: Any,
+    report_state: ReportState | None,
+    coordinator: AgentCoordinator,
+    root_id: str | None,
+) -> None:
+    final = getattr(result, "final_output", None) if result is not None else None
+    logger.error(
+        "Scan %s ended without calling finish_scan. The agent "
+        "emitted a text-only turn instead of a lifecycle tool call, "
+        "so no executive report was written. Final output (first "
+        "300 chars): %r",
+        scan_id,
+        str(final)[:300],
+    )
+    if report_state is not None:
+        with contextlib.suppress(Exception):
+            report_state.cleanup(status="failed")
+    if root_id is not None:
+        with contextlib.suppress(Exception):
+            await coordinator.set_status(root_id, "failed")
+    raise ScanIncompleteError(
+        f"Scan {scan_id} ended without calling finish_scan. "
+        "This is not a completed pentest — do not treat the results as a clean assessment."
+    )
+
+
+def _result_is_scan_completed(result: Any) -> bool:
+    if result is None:
+        return False
+    final = getattr(result, "final_output", None)
+    if isinstance(final, str):
+        try:
+            parsed = json.loads(final)
+        except (ValueError, TypeError):
+            return False
+        return bool(isinstance(parsed, dict) and parsed.get("scan_completed"))
+    if isinstance(final, dict):
+        return bool(final.get("scan_completed"))
+    return False
+
 
 StreamEventSink = Callable[[str, Any], None]
 
@@ -379,8 +434,16 @@ async def run_strix_scan(
         is_whitebox = is_whitebox_scan(targets)
         diff_scope = scan_config.get("diff_scope")
         is_diff_scoped = bool(isinstance(diff_scope, dict) and diff_scope.get("active"))
-        skills = ensure_detected_standard_skills(list(scan_config.get("skills") or []), local_sources)
+        incoming_skills = list(scan_config.get("skills") or [])
+        skills = ensure_detected_standard_skills(incoming_skills, local_sources)
         scan_config["skills"] = skills
+        attach_required_playbooks(scan_config, local_sources)
+        if report_state is not None:
+            surfaces = scan_config.get("detected_surfaces") or []
+            playbooks = scan_config.get("required_playbooks") or []
+            report_state.run_record["detected_surfaces"] = surfaces
+            report_state.run_record["required_playbooks"] = playbooks
+            report_state.save_run_data()
         root_task = build_root_task(scan_config)
 
         baseline_result: BaselineResult | None = None
@@ -573,26 +636,14 @@ async def run_strix_scan(
             event_sink=event_sink,
             hooks=hooks,
         )
-        if not interactive and result is not None:
-            final = getattr(result, "final_output", None)
-            scan_completed = False
-            if isinstance(final, str):
-                try:
-                    parsed = json.loads(final)
-                    scan_completed = bool(isinstance(parsed, dict) and parsed.get("scan_completed"))
-                except (ValueError, TypeError):
-                    scan_completed = False
-            elif isinstance(final, dict):
-                scan_completed = bool(final.get("scan_completed"))
-            if not scan_completed:
-                logger.error(
-                    "Scan %s ended without calling finish_scan. The agent "
-                    "emitted a text-only turn instead of a lifecycle tool call, "
-                    "so no executive report was written. Final output (first "
-                    "300 chars): %r",
-                    scan_id,
-                    str(final)[:300],
-                )
+        if not interactive and not _result_is_scan_completed(result):
+            await _mark_headless_scan_incomplete(
+                scan_id=scan_id,
+                result=result,
+                report_state=report_state,
+                coordinator=coordinator,
+                root_id=root_id,
+            )
         return result  # noqa: TRY300
     except BudgetExceededError as exc:
         logger.info("Scan %s stopped: %s", scan_id, exc)
@@ -618,6 +669,12 @@ async def run_strix_scan(
         if root_id is not None:
             with contextlib.suppress(Exception):
                 await coordinator.set_status(root_id, "running")
+        raise
+    except ScanIncompleteError:
+        report_final_status = "failed"
+        if root_id is not None:
+            with contextlib.suppress(Exception):
+                await coordinator.set_status(root_id, "failed")
         raise
     except BaseException:
         logger.exception("Strix scan %s failed", scan_id)

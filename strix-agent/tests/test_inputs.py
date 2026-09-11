@@ -331,7 +331,14 @@ def test_build_root_task_repository_target() -> None:
 def test_build_root_task_repository_without_url_does_not_mandate_live_http() -> None:
     config = {
         "targets": [
-            {"type": "repository", "details": {"target_repo": "org/app", "cloned_repo_path": "/tmp/x", "workspace_subdir": "app"}},
+            {
+                "type": "repository",
+                "details": {
+                    "target_repo": "org/app",
+                    "cloned_repo_path": "/tmp/x",
+                    "workspace_subdir": "app",
+                },
+            },
         ],
     }
     task = build_root_task(config)
@@ -354,6 +361,34 @@ def test_build_root_task_web_application_with_instructions() -> None:
     assert "JSON-RPC" in task
 
 
+def test_build_root_task_lists_required_playbooks() -> None:
+    config = {
+        "targets": [
+            {
+                "type": "repository",
+                "details": {
+                    "target_repo": "org/app",
+                    "cloned_repo_path": "/workspace/repo",
+                },
+            },
+        ],
+        "required_playbooks": [
+            {
+                "skills": ["mcp_server"],
+                "review_mode": "whitebox",
+                "checklist_key": "mcp_server",
+                "label": "MCP server (source)",
+                "spawn_hint": "Read the handler.",
+            }
+        ],
+    }
+    task = build_root_task(config)
+    assert "Required specialist playbooks" in task
+    assert "review_mode='whitebox'" in task
+    assert "mcp_server" in task
+    assert "outcome=reported requires create_vulnerability_report" in task
+
+
 def test_build_root_task_repository_plus_url_mandates_live_http() -> None:
     config = {
         "targets": [
@@ -372,6 +407,8 @@ def test_build_root_task_repository_plus_url_mandates_live_http() -> None:
     assert "Live-site testing is mandatory" in task
     assert "https://api.example.com/v1" in task
     assert "Repository/source review does not satisfy this" in task
+    assert "stopping condition" in task
+    assert "CORS" in task
 
 
 def test_build_root_task_workspace_mount_is_not_a_target() -> None:

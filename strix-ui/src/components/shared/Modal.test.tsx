@@ -35,6 +35,20 @@ describe("Modal", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("scrolls tall content so the dialog actions stay reachable", () => {
+    render(
+      <Modal open onClose={() => {}} title="Hello" footer={<button type="button">Continue</button>}>
+        <div>body content</div>
+      </Modal>
+    );
+    const scroller = screen.getByText("body content").parentElement;
+    expect(scroller).toHaveClass("overflow-y-auto");
+    expect(screen.getByRole("dialog")).toHaveClass("max-h-[calc(100dvh-2rem)]");
+    expect(screen.getByRole("dialog")).toHaveClass("min-h-0");
+    expect(screen.getByText("body content").closest(".fixed")).toHaveClass("overflow-y-auto");
+    expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument();
+  });
+
   it("calls onClose when the close button is clicked, but not on content clicks", async () => {
     const onClose = vi.fn();
     render(

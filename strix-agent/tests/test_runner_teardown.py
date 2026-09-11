@@ -78,6 +78,7 @@ async def test_a_live_child_is_settled_before_sessions_close(
         child_task["t"] = task
         await coordinator.attach_runtime("child", task=task)
         await child_started.wait()
+        return types.SimpleNamespace(final_output={"scan_completed": True})
 
     monkeypatch.setattr(runner, "run_agent_loop", _root_finishes)
 

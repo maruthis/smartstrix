@@ -72,6 +72,21 @@ class ProviderRefusalError(AgentsException):
     """Raised when a provider returns a structured refusal instead of an exception."""
 
 
+# Only agents still consuming a slot. Stopped/completed/crashed children must
+# not block the next required specialist — the GitLab MCP run sat at the
+# default cap of 12 because every finished child still counted.
+_LIVE_CHILD_STATUSES = frozenset({"running", "waiting", "budget_paused"})
+
+
+def count_live_child_agents(coordinator: AgentCoordinator) -> int:
+    """Children that are still running, waiting, or budget-paused."""
+    return sum(
+        1
+        for agent_id, parent in coordinator.parent_of.items()
+        if parent is not None and coordinator.statuses.get(agent_id) in _LIVE_CHILD_STATUSES
+    )
+
+
 def _agent_depth(parent_of: dict[str, str | None], agent_id: str) -> int:
     depth = 0
     current = agent_id
@@ -88,13 +103,20 @@ def _agent_depth(parent_of: dict[str, str | None], agent_id: str) -> int:
 async def _enforce_child_agent_limits(coordinator: AgentCoordinator, parent_id: str) -> str | None:
     runtime = load_settings().runtime
     async with coordinator._lock:
-        child_count = sum(1 for parent in coordinator.parent_of.values() if parent is not None)
+        child_count = count_live_child_agents(coordinator)
         parent_depth = _agent_depth(coordinator.parent_of, parent_id)
     if runtime.max_child_agents and child_count >= runtime.max_child_agents:
-        return f"Child-agent limit reached ({runtime.max_child_agents}). Finish or stop existing subagents before spawning more."
+        return (
+            f"Child-agent limit reached ({runtime.max_child_agents} live). "
+            "Wait for a running specialist to finish before spawning more — "
+            "stop_agent does not free a slot by killing a required playbook."
+        )
     child_depth = parent_depth + 1
     if runtime.max_agent_depth and child_depth > runtime.max_agent_depth:
-        return f"Child-agent depth limit reached ({runtime.max_agent_depth}). Delegate within the existing agent tree instead."
+        return (
+            f"Child-agent depth limit reached ({runtime.max_agent_depth}). "
+            "Delegate within the existing agent tree instead."
+        )
     return None
 
 
@@ -348,6 +370,7 @@ async def spawn_child_agent(
     task: str,
     skills: list[str],
     parent_history: list[Any],
+    review_mode: str | None = None,
     event_sink: StreamEventSink | None = None,
     hooks: RunHooks[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
@@ -367,6 +390,7 @@ async def spawn_child_agent(
         parent_id,
         task=task,
         skills=skills,
+        review_mode=review_mode,
     )
 
     raw_targets = parent_ctx.get("scan_targets")

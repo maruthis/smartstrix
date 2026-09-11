@@ -124,7 +124,8 @@ def test_finding_detail_falls_back_to_endpoint_when_target_missing():
 
 def test_render_report_html_with_no_findings():
     html = reports.render_report_html(_pentest(), [], _org())
-    assert "No vulnerabilities were identified" in html
+    assert "assistant draft" in html.lower()
+    assert "No findings are included in this assistant draft" in html
     assert "acme/widgets" in html
     assert "Strong" in html  # posture with zero findings
 
@@ -148,6 +149,44 @@ def test_render_report_html_falls_back_to_created_at_when_dates_missing():
     pentest = _pentest(started_at=None, finished_at=None)
     html = reports.render_report_html(pentest, [], _org())
     assert "January 2026" in html  # created_at fallback
+
+
+def test_render_report_html_confirmed_only_empty_copy():
+    html = reports.render_report_html(_pentest(), [], _org(), confirmed_only=True)
+    assert "No confirmed findings are included" in html
+    assert "human sign-off required" in html.lower()
+
+
+def test_render_report_html_includes_coverage_gaps():
+    pentest = _pentest(
+        coverage={
+            "mode": "real",
+            "finish_scan": False,
+            "complete": False,
+            "scan_status": "failed",
+            "caveats": ["finish_scan was never called"],
+            "gaps": [{"kind": "skill_gap", "risk_area": "mcp_server", "detail": "No ledger row"}],
+            "agents": [{"agent_name": "mcp-whitebox", "status": "stopped", "skills": ["mcp_server"]}],
+        }
+    )
+    html = reports.render_report_html(pentest, [], _org())
+    assert "What was not tested" in html
+    assert "finish_scan was never called" in html
+    assert "mcp-whitebox" in html
+    assert "mcp_server" in html
+
+
+def test_render_report_html_includes_known_defect_recall():
+    pentest = _pentest(skills=["owasp_mcp_top_10"])
+    issues = [
+        _issue(title="Service binds on all interfaces (0.0.0.0 / ::)"),
+        _issue(id="i2", title="HTTP request headers logged at runtime", severity="high"),
+    ]
+    html = reports.render_report_html(pentest, issues, _org())
+    assert "Recall vs known defects" in html
+    assert "V1" in html
+    assert "V3" in html
+    assert "miss" in html
 
 
 def test_render_report_pdf_produces_pdf_bytes():

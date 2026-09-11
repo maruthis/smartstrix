@@ -27,7 +27,14 @@ const STATUS_COLORS: Record<string, string> = {
   failed: "text-red-400 bg-red-500/10 border-red-500/30",
   trialing: "text-blue-400 bg-blue-500/10 border-blue-500/30",
   baseline_scan: "text-purple-400 bg-purple-500/10 border-purple-500/30",
+  agent: "text-blue-400 bg-blue-500/10 border-blue-500/30",
+  mock: "text-amber-400 bg-amber-500/10 border-amber-500/30",
   mock_fallback: "text-amber-400 bg-amber-500/10 border-amber-500/30",
+  pending: "text-[#888] bg-[rgba(255,255,255,0.04)] border-[#333]",
+  confirmed: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30",
+  rejected: "text-[#888] bg-[rgba(255,255,255,0.04)] border-[#333]",
+  needs_repro: "text-yellow-400 bg-yellow-500/10 border-yellow-500/30",
+  out_of_scope: "text-[#888] bg-[rgba(255,255,255,0.04)] border-[#333]",
 };
 
 export function StatusPill({ value, label }: { value: string; label?: string }) {

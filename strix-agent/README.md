@@ -10,6 +10,7 @@
 
 ### The open-source AI pentesting tool. Autonomous AI hackers that find and fix your app’s vulnerabilities.
 
+
 <br/>
 
 </div>
@@ -24,6 +25,8 @@
 ## Strix Overview
 
 Strix are autonomous AI penetration testing agents that act just like real hackers - they run your code dynamically, find vulnerabilities, and validate them through actual proofs-of-concept. Built for developers and security teams who need fast, accurate security testing without the overhead of manual pentesting or the false positives of static analysis tools.
+
+Strix acts as an assistant to a human pentest program, not the program itself.
 
 **Key Capabilities:**
 
@@ -440,3 +443,14 @@ backend, frontend, and data model fit together — note it still describes
 the pre-split, single-repo `saas/frontend/` layout in places, so prefer
 `docker-compose.yml` as the source of truth for how the two repos actually
 wire together today.
+
+
+**Deferred Items**
+
+| Defer | Why it is SoR, not assistant |
+| --- | --- |
+| SSO / MFA / approval role | Needed for SoR. A small authorized tester group can live on OTP + admin discipline. |
+| Postgres + durable queue + DR | Needed for portfolio SoR. One-org assistant can stay single-worker if failures are honest. |
+| Split scan workers from API / no Docker socket | Correct architecture. Not the first bottleneck if only trusted operators run it. |
+| SIEM export / immutable audit | Compliance SoR item. Keep the existing audit rows; don't block assistant work on this. |
+| Per-install GitHub webhook tenancy | Only if you onboard many orgs. Single-org GitHub App is enough for now. |

@@ -53,6 +53,19 @@ def _document(**overrides: Any) -> dict[str, Any]:
     return build_coverage_document(**kwargs)
 
 
+def test_document_includes_recall_when_mcp_findings_are_present() -> None:
+    doc = _document(
+        vulnerability_reports=[
+            {"title": "Service binds on all interfaces (0.0.0.0 / ::)"},
+            {"title": "HTTP request headers logged at runtime"},
+        ]
+    )
+    assert doc["recall"]["applicable"] is True
+    assert doc["recall"]["matched"] >= 2
+    hits = {item["id"] for item in doc["recall"]["items"] if item["status"] == "hit"}
+    assert {"V1", "V3"} <= hits
+
+
 def test_document_reports_surfaces_and_outcomes() -> None:
     doc = _document()
 

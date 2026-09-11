@@ -15,6 +15,8 @@ from agents import RunContextWrapper, function_tool
 from strix.core.agents import Status, coordinator_from_context
 from strix.core.execution import notify_parent_on_terminal
 from strix.core.hooks import LLM_TURN_KEY
+from strix.report.state import get_global_report_state
+from strix.scan.playbooks import matching_required_playbook, playbooks_from_scan_config
 from strix.skills import validate_requested_skills
 
 
@@ -26,6 +28,61 @@ logger = logging.getLogger(__name__)
 
 def _ctx(ctx: RunContextWrapper) -> dict[str, Any]:
     return ctx.context if isinstance(ctx.context, dict) else {}
+
+
+def _required_playbooks() -> list[Any]:
+    report_state = get_global_report_state()
+    if report_state is None:
+        return []
+    playbooks = playbooks_from_scan_config(getattr(report_state, "scan_config", None))
+    if playbooks:
+        return playbooks
+    run_record = getattr(report_state, "run_record", None)
+    return playbooks_from_scan_config(run_record if isinstance(run_record, dict) else None)
+
+
+def _agent_subtree_ids(
+    parent_of: dict[str, str | None], root_id: str, *, cascade: bool
+) -> list[str]:
+    if not cascade:
+        return [root_id]
+    order = [root_id]
+    stack = [root_id]
+    while stack:
+        current = stack.pop()
+        children = [aid for aid, parent in parent_of.items() if parent == current]
+        order.extend(children)
+        stack.extend(children)
+    return order
+
+
+def _required_playbook_block(
+    coordinator: Any, target_agent_id: str, *, cascade: bool
+) -> str | None:
+    """Refuse stop_agent when it would kill a required specialist."""
+    playbooks = _required_playbooks()
+    if not playbooks:
+        return None
+    for agent_id in _agent_subtree_ids(coordinator.parent_of, target_agent_id, cascade=cascade):
+        meta = coordinator.metadata.get(agent_id) or {}
+        skills_raw = meta.get("skills")
+        skills = skills_raw if isinstance(skills_raw, list) else []
+        match = matching_required_playbook(
+            playbooks,
+            skills=[str(skill) for skill in skills],
+            review_mode=str(meta.get("review_mode") or ""),
+            name=str(coordinator.names.get(agent_id) or ""),
+            task=str(meta.get("task") or ""),
+        )
+        if match is None:
+            continue
+        return (
+            f"Cannot stop {agent_id} ({coordinator.names.get(agent_id) or agent_id}): "
+            f"required playbook '{match.label}' ({match.review_mode}). "
+            "Wait for that specialist to finish, or send_message_to_agent with "
+            "a narrower task. Killing a required playbook leaves the scan incomplete."
+        )
+    return None
 
 
 def _render_completion_report(
@@ -418,6 +475,7 @@ async def create_agent(
     task: str,
     inherit_context: bool = False,
     skills: list[str] | None = None,
+    review_mode: str | None = None,
 ) -> str:
     """Spawn a specialist child agent to run in parallel.
 
@@ -463,6 +521,11 @@ async def create_agent(
             recent history (still capped).
         skills: List of skill names (e.g. ``["xss", "sql_injection"]``).
             Max 5; prefer 1-3.
+        review_mode: ``whitebox`` (source / repository), ``live`` (HTTP
+            against listed URLs), or ``both``. Required playbooks are
+            gated on this: a live httpx agent does not satisfy a
+            white-box MCP/LLM/agentic row. Omit only when the task
+            text already makes the mode obvious.
     """
     inner = _ctx(ctx)
     coordinator = coordinator_from_context(inner)
@@ -494,6 +557,18 @@ async def create_agent(
             default=str,
         )
 
+    normalized_mode = (review_mode or "").strip().lower() or None
+    if normalized_mode is not None and normalized_mode not in {"whitebox", "live", "both"}:
+        return json.dumps(
+            {
+                "success": False,
+                "error": "review_mode must be 'whitebox', 'live', or 'both'",
+                "agent_id": None,
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+
     parent_history = list(ctx.turn_input) if inherit_context and ctx.turn_input else []
     try:
         result = await spawner(
@@ -502,6 +577,7 @@ async def create_agent(
             task=task,
             skills=skill_list,
             parent_history=parent_history,
+            review_mode=normalized_mode,
         )
     except Exception as e:
         logger.exception("create_agent: scan runner failed to spawn child '%s'", name)
@@ -733,6 +809,18 @@ async def stop_agent(
                 ),
                 "target_agent_id": target_agent_id,
                 "current_status": current_status,
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+
+    protected = _required_playbook_block(coordinator, target_agent_id, cascade=cascade)
+    if protected is not None:
+        return json.dumps(
+            {
+                "success": False,
+                "error": protected,
+                "target_agent_id": target_agent_id,
             },
             ensure_ascii=False,
             default=str,

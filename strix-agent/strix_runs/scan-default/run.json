@@ -2,7 +2,7 @@
   "run_id": "scan-default",
   "run_name": "scan-default",
   "start_time": "2026-08-26T06:55:57.101733+00:00",
-  "end_time": "2026-09-10T12:23:06.474914+00:00",
+  "end_time": "2026-09-10T17:08:32.668109+00:00",
   "status": "stopped",
   "auth_mode": "api_key",
   "targets_info": [],
@@ -34,5 +34,7 @@
   "non_interactive": false,
   "local_sources": [],
   "scope_mode": "auto",
-  "diff_base": null
+  "diff_base": null,
+  "detected_surfaces": [],
+  "required_playbooks": []
 }

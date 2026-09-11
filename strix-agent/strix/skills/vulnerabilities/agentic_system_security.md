@@ -7,6 +7,8 @@ description: Security testing for authorized AI agents and MCP-style tool ecosys
 
 Use this skill when an AI system can select tools, retrieve resources, invoke remote/local services, maintain memory, delegate to other agents, or install skills/plugins. Pair it with `llm_prompt_injection` for instruction attacks and classic vulnerability skills for the downstream HTTP, cloud, filesystem, identity, or code-execution sink.
 
+Required playbook: spawn `review_mode='whitebox'` and inventory tools, confirmation gates, and confused-deputy paths in source. Live HTTP recon does not satisfy this row.
+
 Prompt text is not an authorization boundary. Treat the agent runtime as a confused deputy whose effective authority is bounded by the union of its credentials, tools, resources, network reach, filesystem access, delegated agents, and approval policy, then reduce that upper bound to the actually reachable subset by tracing token audience, scopes, routing, target authorization, environment, and approval flow.
 
 ## Effective-Authority Map

@@ -97,3 +97,5 @@ When you discover a useful pivot (info leak, weak boundary, partial access), imm
 ## Mindset
 
 Methodical and systematic. Document as you go. Validate everything—no assumptions about exploitability. Think about business impact, not just technical severity.
+
+Honor every **Required specialist playbook** in the root task. `finish_scan` rejects a run that skipped a white-box MCP/LLM/agentic/GraphQL/CI row or that marked coverage `reported` without filing a finding.

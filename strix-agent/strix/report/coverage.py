@@ -32,6 +32,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from strix.known_defects import score_findings
 from strix.report.writer import atomic_write_text
 from strix.skills import get_available_skills
 
@@ -270,6 +271,7 @@ def agents_from_graph(graph: dict[str, Any]) -> list[dict[str, Any]]:
                 "status": str(status),
                 "skills": [str(skill) for skill in skills],
                 "task": str(meta.get("task") or ""),
+                "review_mode": str(meta.get("review_mode") or ""),
                 "is_root": agent_id == root_id,
             }
         )
@@ -422,6 +424,16 @@ def _outcome_counts(entries: list[dict[str, Any]]) -> dict[str, int]:
     return {label: counts[label] for label in OUTCOME_LABELS if label in counts}
 
 
+def _recall_against_known_defects(
+    vulnerability_reports: list[dict[str, Any]],
+    skills: list[str],
+) -> dict[str, Any] | None:
+    score = score_findings(vulnerability_reports, skills=skills)
+    if not score.get("applicable"):
+        return None
+    return score
+
+
 def build_coverage_document(
     *,
     run_record: dict[str, Any],
@@ -461,6 +473,7 @@ def build_coverage_document(
         *skill_coverage_gaps(entries, agents),
         *_silent_agent_gaps(entries, agents),
     ]
+    recall = _recall_against_known_defects(vulnerability_reports, skills_exercised)
 
     return {
         "schema_version": COVERAGE_SCHEMA_VERSION,
@@ -489,6 +502,7 @@ def build_coverage_document(
         "completeness": _completeness(run_record, agents, exit_reason),
         "entries": ledger,
         "gaps": gaps,
+        **({"recall": recall} if recall is not None else {}),
     }
 
 
