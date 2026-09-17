@@ -172,8 +172,45 @@ def test_render_report_html_includes_coverage_gaps():
     html = reports.render_report_html(pentest, [], _org())
     assert "What was not tested" in html
     assert "finish_scan was never called" in html
-    assert "mcp-whitebox" in html
-    assert "mcp_server" in html
+    assert "mcp- whitebox" in html
+    assert "mcp_ server" in html
+    assert '<th width="110" valign="top">Kind</th>' in html
+    assert '<th width="150" valign="top">Agent</th>' in html
+    assert '<td width="290" valign="top">' in html
+    assert '<td width="260" valign="top">' in html
+
+
+def test_coverage_specialists_join_skill_lists_not_characters():
+    pentest = _pentest(
+        coverage={
+            "mode": "real",
+            "gaps": [],
+            "agents": [{"agent_name": "root", "status": "completed", "skills": "mcp_server"}],
+        }
+    )
+    html = reports.render_report_html(pentest, [], _org())
+    assert "m, c, p" not in html
+    assert "mcp_ server" in html
+
+
+def test_std_table_empty_state_and_cell_wrapping():
+    html = reports._std_table(
+        [("Kind", 110), ("Area", 90), ("Detail", 290)],
+        [],
+        empty="No coverage gaps were recorded.",
+    )
+    assert "No coverage gaps were recorded." in html
+    assert 'colspan="3"' in html
+    assert reports._cell("standards/owasp_mcp_top_10") == "standards/ owasp_ mcp_ top_ 10"
+    assert reports._cell("unrecorded_risk_class") == "unrecorded_ risk_ class"
+    assert reports._cell("line1\n\nline2") == "line1 line2"
+    assert reports._cell("see /api/users/{id}/invoices") == "see /api/ users/{id}/invoices"
+    title = reports._wrap_label(
+        "awgment-enterprise-modules/awgment-eqms/awgment-openproject-mcpserver"
+    )
+    assert "enterprise- modules/" in title
+    assert "openproject- mcpserver" in title
+
 
 
 def test_render_report_html_includes_known_defect_recall():

@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Strix self-hosted pentest assistant",
+    "locale": "en",
+    "output": "strix-architecture.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "operate",
+        "label": "How operators start work",
+        "focus": ["testers", "dashboard", "gateway", "control-plane"],
+        "note": "Authorized testers use the dashboard behind one gateway into the control plane."
+      },
+      {
+        "id": "scan",
+        "label": "How a scan runs",
+        "focus": ["control-plane", "engine", "sandbox", "targets", "llm"],
+        "note": "The engine attacks authorized targets from an isolated sandbox and calls the LLM you choose."
+      },
+      {
+        "id": "evidence",
+        "label": "How evidence is kept",
+        "focus": ["control-plane", "findings", "testers"],
+        "note": "Findings with proof land in the control plane so people still confirm residual risk."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "testers",
+      "type": "external",
+      "label": "Authorized testers",
+      "sublabel": "Named operators",
+      "pos": [32, 360],
+      "size": [140, 64]
+    },
+    {
+      "id": "dashboard",
+      "type": "frontend",
+      "label": "Strix dashboard",
+      "sublabel": "Scans and PRs",
+      "pos": [220, 360],
+      "size": [140, 64]
+    },
+    {
+      "id": "gateway",
+      "type": "backend",
+      "label": "nginx gateway",
+      "sublabel": "Port 8095",
+      "pos": [408, 360],
+      "size": [140, 64]
+    },
+    {
+      "id": "control-plane",
+      "type": "backend",
+      "label": "FastAPI control plane",
+      "sublabel": "/api",
+      "pos": [596, 360],
+      "size": [150, 64]
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "Strix engine",
+      "sublabel": "Multi-agent",
+      "pos": [794, 360],
+      "size": [140, 64]
+    },
+    {
+      "id": "sandbox",
+      "type": "security",
+      "label": "Docker sandbox",
+      "sublabel": "Isolated runtime",
+      "pos": [982, 360],
+      "size": [150, 64]
+    },
+    {
+      "id": "targets",
+      "type": "external",
+      "label": "Authorized targets",
+      "sublabel": "Code and APIs",
+      "pos": [1180, 360],
+      "size": [140, 64]
+    },
+    {
+      "id": "llm",
+      "type": "external",
+      "label": "LLM provider",
+      "sublabel": "Your model",
+      "pos": [794, 70],
+      "size": [140, 64]
+    },
+    {
+      "id": "findings",
+      "type": "database",
+      "label": "Findings and reports",
+      "sublabel": "PoC and SARIF",
+      "pos": [596, 560],
+      "size": [150, 64]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Self-hosted Strix",
+      "wraps": ["dashboard", "gateway", "control-plane", "engine", "sandbox", "findings"]
+    },
+    {
+      "kind": "security-group",
+      "label": "Scan isolation",
+      "wraps": ["sandbox"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "open-dashboard",
+      "from": "testers",
+      "to": "dashboard",
+      "label": "HTTPS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "same-origin",
+      "from": "dashboard",
+      "to": "gateway",
+      "label": "same origin",
+      "labelDy": -26
+    },
+    {
+      "id": "api-calls",
+      "from": "gateway",
+      "to": "control-plane",
+      "label": "/api"
+    },
+    {
+      "id": "start-scan",
+      "from": "control-plane",
+      "to": "engine",
+      "label": "start scan",
+      "labelDy": -26
+    },
+    {
+      "id": "isolate-runtime",
+      "from": "engine",
+      "to": "sandbox",
+      "label": "spawn sandbox",
+      "labelDy": 56
+    },
+    {
+      "id": "authorized-test",
+      "from": "sandbox",
+      "to": "targets",
+      "label": "authorized test",
+      "variant": "security",
+      "labelDy": 56
+    },
+    {
+      "id": "model-calls",
+      "from": "engine",
+      "to": "llm",
+      "label": "model calls"
+    },
+    {
+      "id": "persist-evidence",
+      "from": "control-plane",
+      "to": "findings",
+      "label": "persist evidence",
+      "labelDy": 48
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Control",
+      "items": [
+        "Dashboard and API run in your environment behind one gateway",
+        "You choose the LLM provider and keep the keys"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Isolation",
+      "items": [
+        "Each scan runs in a Docker sandbox, not on a laptop",
+        "Only authorized testers may hit assets you own or have written permission to test"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Evidence",
+      "items": [
+        "Findings include proof, SARIF, and coverage of what was actually tested",
+        "People still confirm residual-risk language"
+      ]
+    }
+  ]
+}

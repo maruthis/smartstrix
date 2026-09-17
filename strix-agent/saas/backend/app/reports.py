@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from html import escape
 from io import BytesIO
 
@@ -82,6 +83,71 @@ def _esc(value: str | None) -> str:
     return escape(value or "").replace("\n", "<br/>")
 
 
+def _esc_plain(value: str | None) -> str:
+    return escape(value or "")
+
+
+# xhtml2pdf will not wrap ``unrecorded_risk_class`` or repo paths unless we
+# insert a real space after ``/``, ``_``, and ``-``. Zero-width spaces render
+# as missing-glyph boxes.
+_WRAP_TOKEN = re.compile(r"(?<=[A-Za-z0-9])[/\-_](?=[A-Za-z0-9])")
+_TABLE_WIDTH = 490
+
+
+def _wrap_label(value: str | None) -> str:
+    return _WRAP_TOKEN.sub(lambda match: f"{match.group(0)} ", " ".join(_esc_plain(value).split()))
+
+
+def _cell(value: str | None) -> str:
+    """Escape a PDF table cell. Newlines become spaces — ``<br/>`` inside a
+    cell throws off xhtml2pdf row height.
+    """
+    return _wrap_label(value)
+
+
+def _skill_list(raw: object) -> str:
+    if isinstance(raw, list):
+        return ", ".join(str(item) for item in raw if item)
+    if isinstance(raw, str):
+        return raw
+    return ""
+
+
+def _std_table(
+    headers: list[tuple[str, int]],
+    rows: list[list[str]],
+    *,
+    empty: str,
+) -> str:
+    """Build a table xhtml2pdf can keep aligned.
+
+    ``headers`` is ``(label, width_pt)``. Width is set on every cell — percent
+    ``colgroup`` / ``table-layout: fixed`` is ignored or collapsed by pisa,
+    which is what mashed Gaps and Specialists together.
+    """
+    total = sum(width for _, width in headers)
+
+    def render_row(values: list[str], *, header: bool) -> str:
+        tag = "th" if header else "td"
+        cells = []
+        for (_label, width), raw in zip(headers, values, strict=True):
+            text = _esc_plain(raw) if header else (_cell(raw) or "—")
+            cells.append(f'<{tag} width="{width}" valign="top">{text}</{tag}>')
+        return "<tr>" + "".join(cells) + "</tr>"
+
+    if not rows:
+        body = f'<tr><td width="{total}" colspan="{len(headers)}">{_esc_plain(empty)}</td></tr>'
+    else:
+        body = "".join(render_row(row, header=False) for row in rows)
+    head = render_row([label for label, _ in headers], header=True)
+    return f"""
+    <table class="std-table" width="{total}" border="1" cellspacing="0" cellpadding="5">
+      {head}{body}
+    </table>
+    """
+
+
+
 def _summary_bar(counts: dict[str, int]) -> str:
     total = max(sum(counts.values()), 1)
     rows = []
@@ -106,10 +172,10 @@ def _finding_row(index: int, issue: models.Issue) -> str:
     color = SEVERITY_COLORS.get(issue.severity, "#888")
     return f"""
     <tr>
-      <td>{_vid(index)}</td>
-      <td>{_esc(issue.title)}</td>
-      <td style="color:{color};font-weight:600">{issue.severity.capitalize()}</td>
-      <td>{STATUS_LABELS.get(issue.status, issue.status.capitalize())}</td>
+      <td width="50" valign="top">{_vid(index)}</td>
+      <td width="250" valign="top">{_wrap_label(issue.title)}</td>
+      <td width="80" valign="top" style="color:{color};font-weight:600">{issue.severity.capitalize()}</td>
+      <td width="110" valign="top">{STATUS_LABELS.get(issue.status, issue.status.capitalize())}</td>
     </tr>
     """
 
@@ -207,16 +273,24 @@ def _coverage_section(pentest: models.Pentest) -> str:
     gaps = coverage.get("gaps") or []
     agents = coverage.get("agents") or []
     caveat_html = "".join(f"<li>{_esc(str(item))}</li>" for item in caveats)
-    gap_rows = "".join(
-        f"<tr><td>{_esc(str(gap.get('kind', '')))}</td><td>{_esc(str(gap.get('risk_area') or gap.get('surface') or ''))}</td><td>{_esc(str(gap.get('detail', '')))}</td></tr>"
+    gap_rows = [
+        [
+            str(gap.get("kind", "")),
+            str(gap.get("risk_area") or gap.get("surface") or ""),
+            str(gap.get("detail", "")),
+        ]
         for gap in gaps
         if isinstance(gap, dict)
-    ) or '<tr><td colspan="3">No coverage gaps were recorded.</td></tr>'
-    agent_rows = "".join(
-        f"<tr><td>{_esc(str(agent.get('agent_name', '')))}</td><td>{_esc(str(agent.get('status', '')))}</td><td>{_esc(', '.join(agent.get('skills') or []))}</td></tr>"
+    ]
+    agent_rows = [
+        [
+            str(agent.get("agent_name", "")),
+            str(agent.get("status", "")),
+            _skill_list(agent.get("skills")),
+        ]
         for agent in agents
         if isinstance(agent, dict)
-    ) or '<tr><td colspan="3">No specialist agents were recorded.</td></tr>'
+    ]
     return f"""
     <table class="exec-table">
       <tr><th>finish_scan called</th><td>{finish}</td></tr>
@@ -226,38 +300,45 @@ def _coverage_section(pentest: models.Pentest) -> str:
     </table>
     {"<ul>" + caveat_html + "</ul>" if caveat_html else ""}
     <h3>Gaps</h3>
-    <table class="std-table">
-      <tr><th>Kind</th><th>Area</th><th>Detail</th></tr>
-      {gap_rows}
-    </table>
+    {_std_table(
+        [("Kind", 110), ("Area", 90), ("Detail", 290)],
+        gap_rows,
+        empty="No coverage gaps were recorded.",
+    )}
     <h3>Specialists</h3>
-    <table class="std-table">
-      <tr><th>Agent</th><th>Status</th><th>Skills</th></tr>
-      {agent_rows}
-    </table>
+    {_std_table(
+        [("Agent", 150), ("Status", 80), ("Skills", 260)],
+        agent_rows,
+        empty="No specialist agents were recorded.",
+    )}
     """
+
 
 
 def _recall_section(pentest: models.Pentest, issues: list[models.Issue]) -> str:
     score = score_pentest_recall(pentest, issues)
     if not score.get("applicable"):
         return ""
-    rows = "".join(
-        f"<tr><td>{_esc(str(item.get('id', '')))}</td>"
-        f"<td>{_esc(str(item.get('title', '')))}</td>"
-        f"<td>{_esc(str(item.get('severity', '')))}</td>"
-        f"<td>{_esc(str(item.get('status', '')))}</td></tr>"
+    rows = [
+        [
+            str(item.get("id", "")),
+            str(item.get("title", "")),
+            str(item.get("severity", "")),
+            str(item.get("status", "")),
+        ]
         for item in score.get("items") or []
         if isinstance(item, dict)
-    )
+    ]
     return f"""
     <h2>Recall vs known defects</h2>
     <p class="muted">{_esc(str(score.get('title') or ''))}. Matched {score.get('matched', 0)} of {score.get('total', 0)}. Misses are the quality loop, not a clean bill of health.</p>
-    <table class="std-table">
-      <tr><th>ID</th><th>Known defect</th><th>Severity</th><th>This run</th></tr>
-      {rows}
-    </table>
+    {_std_table(
+        [("ID", 50), ("Known defect", 250), ("Severity", 80), ("This run", 110)],
+        rows,
+        empty="No known-defect checklist rows were recorded.",
+    )}
     """
+
 
 
 def render_report_html(
@@ -286,8 +367,13 @@ def render_report_html(
     findings_or_none = (
         f"""
         <div class="chart">{_summary_bar(counts)}</div>
-        <table class="std-table">
-          <tr><th>VID</th><th>Name of the Vulnerability</th><th>Severity</th><th>Current Status</th></tr>
+        <table class="std-table" width="{_TABLE_WIDTH}" border="1" cellspacing="0" cellpadding="5">
+          <tr>
+            <th width="50" valign="top">VID</th>
+            <th width="250" valign="top">Name of the Vulnerability</th>
+            <th width="80" valign="top">Severity</th>
+            <th width="110" valign="top">Current Status</th>
+          </tr>
           {snapshot_rows}
         </table>
         """
@@ -311,19 +397,21 @@ def render_report_html(
   @page {{ size: A4; margin: 2.2cm 1.8cm; }}
   * {{ box-sizing: border-box; }}
   body {{ font-family: Helvetica, Arial, sans-serif; color: #1a1a1a; font-size: 12px; line-height: 1.5; }}
-  h1 {{ font-size: 26px; color: #1d4ed8; margin-bottom: 4px; }}
+  h1 {{ font-size: 22px; color: #1d4ed8; margin-bottom: 4px; }}
   h2 {{ font-size: 18px; color: #1d4ed8; border-bottom: 1px solid #ddd; padding-bottom: 6px; margin-top: 32px; }}
   h3 {{ font-size: 14px; color: #1d4ed8; margin-top: 20px; margin-bottom: 6px; }}
-  .cover {{ text-align: center; padding-top: 120px; }}
+  .cover {{ text-align: center; padding-top: 80px; }}
   .cover .brand {{ font-size: 13px; letter-spacing: 2px; color: #888; text-transform: uppercase; }}
-  .cover h1 {{ font-size: 30px; margin-top: 24px; }}
-  .cover .meta {{ margin-top: 60px; font-size: 13px; color: #444; }}
-  table {{ width: 100%; border-collapse: collapse; margin: 10px 0 18px; }}
+  .cover-title td {{ font-size: 18px; color: #1d4ed8; font-weight: 700; }}
+  .cover .meta {{ margin-top: 48px; font-size: 13px; color: #444; }}
+  table {{ border-collapse: collapse; margin: 10px 0 18px; }}
   .std-table th, .std-table td, .exec-table th, .exec-table td, .detail-table th, .detail-table td {{
     border: 1px solid #ccc; padding: 6px 8px; text-align: left; vertical-align: top; font-size: 11px;
   }}
   .std-table th {{ background: #f2f4f8; }}
+  .exec-table {{ width: 100%; }}
   .exec-table th {{ width: 26%; background: #f2f4f8; }}
+  .detail-table {{ width: 100%; }}
   .detail-table th {{ width: 24%; background: #f7f7f7; font-weight: 600; }}
   .finding-block {{ page-break-inside: avoid; margin-bottom: 10px; }}
   .chart {{ margin: 14px 0 20px; }}
@@ -345,7 +433,9 @@ def render_report_html(
 
 <div class="cover">
   <div class="brand">Assistant draft — human sign-off required</div>
-  <h1>{_esc(pentest.target_label)}</h1>
+  <table class="cover-title" width="{_TABLE_WIDTH}" align="center" border="0" cellspacing="0" cellpadding="8">
+    <tr><td align="center">{_wrap_label(pentest.target_label)}</td></tr>
+  </table>
   <div class="meta">
     Prepared for: {_esc(org.name)}<br/>
     Prepared by: Strix Security<br/>
@@ -371,7 +461,7 @@ def render_report_html(
 <p>This section summarizes the assistant pass against {_esc(pentest.target_label)}. Posture below is derived only from the findings in this export and is not an assurance rating.</p>
 <table class="exec-table">
   <tr><th>Engagement Date</th><td>{_fmt_month(pentest.started_at or pentest.created_at)}</td></tr>
-  <tr><th>Target Systems</th><td>{_esc(pentest.target_label)} ({target_kind})</td></tr>
+  <tr><th>Target Systems</th><td>{_wrap_label(pentest.target_label)} ({target_kind})</td></tr>
   <tr><th>Scope</th><td>{scope_desc}</td></tr>
   <tr><th>Scan Mode</th><td>{_esc(pentest.scan_mode.capitalize())}</td></tr>
   <tr><th>Methodology</th><td>This VAPT is conducted following the NIST framework, OWASP Top 10, and industry best practices.</td></tr>
@@ -439,8 +529,13 @@ def render_pr_review_report_html(
     findings_or_none = (
         f"""
         <div class="chart">{_summary_bar(counts)}</div>
-        <table class="std-table">
-          <tr><th>VID</th><th>Name of the Vulnerability</th><th>Severity</th><th>Current Status</th></tr>
+        <table class="std-table" width="{_TABLE_WIDTH}" border="1" cellspacing="0" cellpadding="5">
+          <tr>
+            <th width="50" valign="top">VID</th>
+            <th width="250" valign="top">Name of the Vulnerability</th>
+            <th width="80" valign="top">Severity</th>
+            <th width="110" valign="top">Current Status</th>
+          </tr>
           {snapshot_rows}
         </table>
         """
@@ -459,19 +554,21 @@ def render_pr_review_report_html(
   @page {{ size: A4; margin: 2.2cm 1.8cm; }}
   * {{ box-sizing: border-box; }}
   body {{ font-family: Helvetica, Arial, sans-serif; color: #1a1a1a; font-size: 12px; line-height: 1.5; }}
-  h1 {{ font-size: 26px; color: #1d4ed8; margin-bottom: 4px; }}
+  h1 {{ font-size: 22px; color: #1d4ed8; margin-bottom: 4px; }}
   h2 {{ font-size: 18px; color: #1d4ed8; border-bottom: 1px solid #ddd; padding-bottom: 6px; margin-top: 32px; }}
   h3 {{ font-size: 14px; color: #1d4ed8; margin-top: 20px; margin-bottom: 6px; }}
-  .cover {{ text-align: center; padding-top: 120px; }}
+  .cover {{ text-align: center; padding-top: 80px; }}
   .cover .brand {{ font-size: 13px; letter-spacing: 2px; color: #888; text-transform: uppercase; }}
-  .cover h1 {{ font-size: 30px; margin-top: 24px; }}
-  .cover .meta {{ margin-top: 60px; font-size: 13px; color: #444; }}
-  table {{ width: 100%; border-collapse: collapse; margin: 10px 0 18px; }}
+  .cover-title td {{ font-size: 18px; color: #1d4ed8; font-weight: 700; }}
+  .cover .meta {{ margin-top: 48px; font-size: 13px; color: #444; }}
+  table {{ border-collapse: collapse; margin: 10px 0 18px; }}
   .std-table th, .std-table td, .exec-table th, .exec-table td, .detail-table th, .detail-table td {{
     border: 1px solid #ccc; padding: 6px 8px; text-align: left; vertical-align: top; font-size: 11px;
   }}
   .std-table th {{ background: #f2f4f8; }}
+  .exec-table {{ width: 100%; }}
   .exec-table th {{ width: 26%; background: #f2f4f8; }}
+  .detail-table {{ width: 100%; }}
   .detail-table th {{ width: 24%; background: #f7f7f7; font-weight: 600; }}
   .finding-block {{ page-break-inside: avoid; margin-bottom: 10px; }}
   .chart {{ margin: 14px 0 20px; }}

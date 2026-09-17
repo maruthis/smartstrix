@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Strix — Internal briefing</title>
+  <style>
+    :root {
+      --bg: #0c0f14;
+      --panel: #151a22;
+      --ink: #e8edf4;
+      --muted: #93a0b3;
+      --line: #2a3342;
+      --accent: #c45c26;
+      --ok: #3d9b6d;
+      --warn: #c9a227;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      overflow: hidden;
+    }
+    .deck { height: 100%; position: relative; }
+    .slide {
+      display: none;
+      height: 100%;
+      padding: 64px 80px 88px;
+      flex-direction: column;
+      justify-content: center;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+    .slide.active { display: flex; }
+    .kicker {
+      color: var(--accent);
+      font-size: 14px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      font-weight: 700;
+      margin: 0 0 16px;
+    }
+    h1 { font-size: 52px; line-height: 1.12; margin: 0 0 20px; font-weight: 700; }
+    h2 { font-size: 36px; line-height: 1.2; margin: 0 0 24px; font-weight: 700; }
+    p.lead { font-size: 22px; line-height: 1.45; color: var(--muted); margin: 0; max-width: 920px; }
+    ul { margin: 0; padding: 0; list-style: none; }
+    li { font-size: 22px; line-height: 1.4; margin: 0 0 14px; padding-left: 22px; position: relative; }
+    li::before {
+      content: "";
+      width: 8px; height: 8px;
+      background: var(--accent);
+      position: absolute; left: 0; top: 0.55em;
+    }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+    .features { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .features .card { padding: 16px 18px; }
+    .features .card h3 { font-size: 15px; margin-bottom: 6px; }
+    .features .card p { font-size: 14px; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 22px 24px;
+    }
+    .card h3 { margin: 0 0 8px; font-size: 18px; }
+    .card p { margin: 0; color: var(--muted); font-size: 16px; line-height: 1.45; }
+    .tag {
+      display: inline-block;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      margin-right: 8px;
+      margin-bottom: 8px;
+    }
+    .do { border-left: 4px solid var(--ok); }
+    .dont { border-left: 4px solid var(--warn); }
+    footer.bar {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 28px;
+      color: var(--muted);
+      font-size: 13px;
+      background: var(--bg);
+      border-top: 1px solid var(--line);
+    }
+    .notes {
+      display: none;
+      position: fixed;
+      right: 20px;
+      bottom: 56px;
+      width: 380px;
+      max-height: 42vh;
+      overflow: auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 16px 18px;
+      font-size: 14px;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+    .notes.show { display: block; }
+    .notes strong { color: var(--ink); }
+    .help { color: var(--muted); }
+    @media print {
+      html, body { overflow: visible; background: #fff; color: #111; }
+      .slide { display: flex; page-break-after: always; height: 100vh; color: #111; }
+      footer.bar, .notes { display: none !important; }
+      .card { background: #f4f4f4; border-color: #ddd; }
+      p.lead, .card p, li { color: #333; }
+    }
+  </style>
+</head>
+<body>
+  <div class="deck" id="deck">
+
+    <section class="slide active" data-notes="Internal audience: AppSec, engineering, and authorized testers. This is how we operate Strix — not a sales pitch. Residual-risk language still comes from people.">
+      <p class="kicker">Internal briefing</p>
+      <h1>How we run Strix as a pentest assistant</h1>
+      <p class="lead">Same engine as the customer story. This cut is for operators: features, toolkit, standards maps, artifacts, and the rules we do not break.</p>
+      <p style="margin-top:28px;color:var(--muted)">Confidential · AppSec and engineering · ~15 minutes</p>
+    </section>
+
+    <section class="slide" data-notes="Same identity as the other decks. Assistant, not system of record. Only authorized targets.">
+      <p class="kicker">Role</p>
+      <h2>Force multiplier for a human pentest program</h2>
+      <div class="grid">
+        <div class="card do">
+          <h3>We use it to</h3>
+          <p>Attack authorized code, URLs, and APIs; persist proof; map coverage to a named standard; and put findings in front of developers before merge.</p>
+        </div>
+        <div class="card dont">
+          <h3>We do not use it to</h3>
+          <p>Close residual risk, skip domain verification, dump secrets into tickets, or treat a green dashboard as a complete pentest.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="Same nine features as the customer and stakeholder decks. On this cut you can name the implementation: markdown skills, --skill, strix_runs artifacts, docker compose dashboard.">
+      <p class="kicker">Salient features</p>
+      <h2>What we can count on</h2>
+      <div class="features">
+        <div class="card"><h3>Attacks and proves</h3><p>Agents exploit authorized apps and attach a PoC and reproduction steps when they can validate the issue — not a lint list.</p></div>
+        <div class="card"><h3>Real pentest toolkit</h3><p>HTTP proxy, browser, shell, exploit runtime, recon, and SAST/DAST — the same class of tools a human tester uses.</p></div>
+        <div class="card"><h3>Multi-agent graph</h3><p>Specialized agents split recon, exploitation, and follow-on work, share discoveries, and chain issues like a small red team.</p></div>
+        <div class="card"><h3>CLI and dashboard</h3><p>One engine: headless CLI for CI, or a self-hosted dashboard for orgs, schedules, PR reviews, and a findings queue.</p></div>
+        <div class="card"><h3>Artifact-driven</h3><p>Coverage maps and scan outputs are durable files — reports, SARIF, findings — not a chat transcript that vanishes.</p></div>
+        <div class="card"><h3>Matched to standards</h3><p>Pin a pentest to OWASP Top 10, ASVS, NIST, PCI DSS, and related maps. Findings are tagged to the standard and CWE.</p></div>
+        <div class="card"><h3>Evidence we can act on</h3><p>Severity, impact, remediation guidance, markdown, JSON, and SARIF so results land in GitHub, GitLab, and existing workflows.</p></div>
+        <div class="card"><h3>Fits how we ship</h3><p>PR comments, CI gates, scheduled staging scans, and agent skills so review starts before merge.</p></div>
+        <div class="card"><h3>Honest coverage</h3><p>Each run shows what was tested and skipped. A green dashboard is not a pass. People still own residual risk.</p></div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="Do not demo exploits in this room. The point is capability class. Findings still need human confirmation before we change residual-risk language.">
+      <p class="kicker">Toolkit</p>
+      <h2>What the agents are allowed to use</h2>
+      <div class="grid">
+        <div class="card"><h3>Intercept and browse</h3><p>HTTP interception proxy (Caido), plus an automated browser for XSS, CSRF, clickjacking, and auth-bypass flows.</p></div>
+        <div class="card"><h3>Exploit and prove</h3><p>Interactive shell, Python sandbox for PoCs, recon/OSINT, and SAST + DAST against the same target.</p></div>
+        <div class="card"><h3>Classes we hunt</h3><p>Broken access control and IDOR, injection, SSRF/XXE/RCE, XSS/CSRF, business logic, session/JWT, API authz, and LLM/MCP surfaces when in scope.</p></div>
+        <div class="card"><h3>Always isolated</h3><p>Each scan runs in its own Docker sandbox. Attack tooling does not sit on a laptop, and mock mode is labeled — never shown as a finished pentest.</p></div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="This is a technical overlay. Policy paperwork for NIST RMF or PCI is out of scope. Default in the dashboard is OWASP Top 10. CLI: --skill owasp_top_10 --skill nist_ssdf. New maps are markdown under strix/skills/standards/.">
+      <p class="kicker">Standards</p>
+      <h2>Pentests can be matched to a named map</h2>
+      <p class="lead" style="margin-bottom:22px">Select in the dashboard or pass <span style="color:var(--ink)">--skill</span>. Every testable row becomes a coverage category. Findings are tagged with the standard ID and CWE.</p>
+      <p>
+        <span class="tag">OWASP Top 10:2025</span>
+        <span class="tag">OWASP ASVS L1/L2</span>
+        <span class="tag">OWASP API Top 10</span>
+        <span class="tag">OWASP LLM / MCP / Agentic</span>
+        <span class="tag">NIST SSDF / 800-53</span>
+        <span class="tag">NIST AI RMF</span>
+        <span class="tag">PCI DSS 4.0 (technical)</span>
+      </p>
+      <p class="lead" style="margin-top:20px">This is coverage of testable controls, not a compliance certificate.</p>
+    </section>
+
+    <section class="slide" data-notes="Walk the artifact path: markdown skills in, run directory out. Dashboard, CI, and strix view all read the same files. That is why resume, PR comments, and later questionnaires can cite the same evidence.">
+      <p class="kicker">Artifact-driven architecture</p>
+      <h2>Files drive the agents. Files are what we keep.</h2>
+      <ul>
+        <li><strong>In</strong> — standards and vulnerability skills are markdown artifacts. Drop a map in; no hardcoded registry of “what we test.”</li>
+        <li><strong>During</strong> — the root agent spawns specialists from those maps and writes findings as they are proven, not as a dump at the end.</li>
+        <li><strong>Out</strong> — each run persists a pentest report, per-finding markdown, JSON, SARIF, and coverage under <span style="color:var(--ink)">strix_runs/</span>.</li>
+        <li><strong>Reuse</strong> — dashboard, CI, <span style="color:var(--ink)">strix view</span>, and PR comments all read those artifacts. Chat is optional commentary on top.</li>
+      </ul>
+    </section>
+
+    <section class="slide" data-notes="Operators need the two entry points. docker compose up --build for the dashboard at localhost:8095. CLI for CI. Real scans need Docker socket + LLM key. Mock mode is for UI exploration only.">
+      <p class="kicker">How we run it</p>
+      <h2>Same engine, two doors</h2>
+      <div class="grid">
+        <div class="card"><h3>CLI</h3><p>Headless scans against a repo, URL, domain, or IP. Use <span style="color:var(--ink)">-n</span> in CI, pin a standard with <span style="color:var(--ink)">--skill</span>, and fail the job on validated findings.</p></div>
+        <div class="card"><h3>Self-hosted dashboard</h3><p><span style="color:var(--ink)">docker compose up --build</span> — orgs, connected repos/domains, scheduled scans, PR reviews, chat over a run, findings queue at localhost:8095.</p></div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="Non-negotiables. If someone asks to scan a customer prod URL without written permission, the answer is no. Confirm/dispute/defer before residual-risk language changes.">
+      <p class="kicker">Operating rules</p>
+      <h2>People still own the decision</h2>
+      <ul>
+        <li>Only <strong>authorized testers</strong> start scans, and only against assets we own or have written permission to test.</li>
+        <li>Findings are <strong>proposed evidence</strong>. Confirm, dispute, or defer before residual-risk wording changes.</li>
+        <li>Live targets require <strong>domain verification</strong>. Unverified hosts are not in-scope.</li>
+        <li>Secrets stay out of tickets. Mock or incomplete runs stay labeled. Telemetry stays off unless we turn it on.</li>
+      </ul>
+    </section>
+
+    <section class="slide" data-notes="Same honesty as the stakeholder deck. If asked whether this replaces the annual pentest vendor: no. It reduces how often we fly blind between assessments.">
+      <p class="kicker">Limits we will say out loud</p>
+      <h2>A strong assistant. Not a complete pentest on every run.</h2>
+      <div class="grid">
+        <div class="card dont"><h3>Coverage has a budget</h3><p>Scan mode, time, and target type cap what gets exercised. Green means nothing proven in what we tested — not that the product is safe.</p></div>
+        <div class="card dont"><h3>Not the system of record</h3><p>SSO/MFA at enterprise scale, portfolio GRC, and immutable compliance audit are still platform and human work. Strix feeds that work.</p></div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="Leave this up. Point people at the architecture HTML for the picture, and at the customer/stakeholder decks if they are presenting outward.">
+      <p class="kicker">Discussion</p>
+      <h1>What we run next, and who is allowed to start it</h1>
+      <p class="lead">Name the apps, the standard map, the authorized testers, and the rule that residual-risk language still comes from AppSec.</p>
+      <p style="margin-top:32px">
+        <span class="tag">← → or space to navigate</span>
+        <span class="tag">F fullscreen</span>
+        <span class="tag">N speaker notes</span>
+        <span class="tag">P print to PDF</span>
+      </p>
+    </section>
+
+  </div>
+
+  <aside class="notes" id="notes"></aside>
+  <footer class="bar">
+    <span>Strix · internal briefing</span>
+    <span id="pos">1 / 10</span>
+    <span class="help">← → · N notes · F fullscreen</span>
+  </footer>
+
+  <script>
+    const slides = [...document.querySelectorAll(".slide")];
+    const notesEl = document.getElementById("notes");
+    const posEl = document.getElementById("pos");
+    let i = 0;
+    let notesOn = false;
+
+    function show(n) {
+      i = Math.max(0, Math.min(slides.length - 1, n));
+      slides.forEach((s, idx) => s.classList.toggle("active", idx === i));
+      posEl.textContent = (i + 1) + " / " + slides.length;
+      notesEl.innerHTML = "<strong>Speaker notes</strong><br>" + (slides[i].dataset.notes || "");
+    }
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") {
+        e.preventDefault();
+        show(i + 1);
+      } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault();
+        show(i - 1);
+      } else if (e.key === "n" || e.key === "N") {
+        notesOn = !notesOn;
+        notesEl.classList.toggle("show", notesOn);
+        show(i);
+      } else if (e.key === "f" || e.key === "F") {
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+        else document.exitFullscreen();
+      }
+    });
+
+    document.getElementById("deck").addEventListener("click", (e) => {
+      if (e.target.closest(".notes")) return;
+      show(i + (e.clientX > window.innerWidth / 2 ? 1 : -1));
+    });
+
+    show(0);
+  </script>
+</body>
+</html>
