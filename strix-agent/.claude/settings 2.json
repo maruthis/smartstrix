@@ -1,0 +1,52 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -b cookies.txt \"http://127.0.0.1:8000/api/issues?domain_id=19041e050de54dbbbffa1f370574dd9b\")",
+      "Bash(python3 -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\(len\\(d['items']\\),'issues'\\)\")",
+      "Bash(awk 'NR==23||NR==30||NR==48||NR==58{print NR\": \"$0}' app/deps.py)",
+      "Bash(awk 'NR==44||NR==69||NR==79||\\(NR>=129&&NR<=132\\)||\\(NR>=138&&NR<=151\\){print NR\": \"$0}' app/jobs.py)",
+      "Bash(awk 'NR==35||NR==65{print NR\": \"$0}' app/providers/billing.py)",
+      "Bash(awk 'NR==56||NR==89||NR==90{print NR\": \"$0}' app/providers/github.py)",
+      "Bash(awk 'NR>=26&&NR<=29{print NR\": \"$0}' app/routers/billing.py)",
+      "Bash(npx vitest *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(grep -iE \"coverage|pytest_cache|\\\\.db$\")",
+      "Bash(python3 -c \"import yaml; yaml.safe_load\\(open\\('.github/workflows/saas-tests.yml'\\)\\)\")",
+      "Bash(grep -iE \"node_modules|\\\\.venv|coverage|\\\\.db$|pytest_cache|htmlcov\")",
+      "Bash(git commit -m ' *)",
+      "Bash(chmod +x /Users/maruti/Documents/TSGit/strix/saas/dev.sh)",
+      "Bash(nohup saas/dev.sh)",
+      "Bash(echo \"launcher pid: $!\")",
+      "Bash(pkill -f \"saas/dev.sh\")",
+      "Bash(rm -f saas/backend/strix_saas.db)",
+      "Bash(lsof -nP -iTCP:8000 -iTCP:5173 -sTCP:LISTEN)",
+      "Bash(cd /Users/maruti/Documents/TSGit/strix *)",
+      "Bash(rm -f strix_saas.db)",
+      "Bash(SAAS_ENABLE_REAL_SCAN=1 nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 8000)",
+      "Bash(nohup uv run pytest -q)",
+      "Bash(echo \"pid: $!\")",
+      "Bash(pkill -f \"uvicorn app.main:app\" 2>/dev/null; pkill -f \"vite\" 2>/dev/null; sleep 1 *)",
+      "Bash(curl -s -o /dev/null -w \"llm-provider page: %{http_code}\\\\n\" http://localhost:5173/settings/llm-provider)",
+      "Bash(curl -s -o /dev/null -w \"api-access page:   %{http_code}\\\\n\" http://localhost:5173/settings/api-access)",
+      "Bash(find /Users/maruti/Documents/TSGit/strix -iname \"CLAUDE.md\" -not -path \"*/node_modules/*\" 2>&1; ls -la ~/.claude/CLAUDE.md 2>&1)",
+      "Read(//Users/maruti/.claude/**)",
+      "Bash(cd /Users/maruti/Documents/TSGit/strix/saas/backend/app/routers && sed -n '1,50p' pr_reviews.py; echo ---; grep -n \"except\\\\b\" *.py ../*.py)",
+      "Read(//Users/maruti/Documents/TSGit/**)",
+      "Bash(grep -rln \"onSearch={setSearch}\\\\|search, onSearch\" /Users/maruti/Documents/TSGit/strix/saas/frontend/src/pages)",
+      "Bash(rm -f /tmp/strix_saas_verify.db)",
+      "Bash(SAAS_DEV_MODE=1 DATABASE_URL=\"sqlite:///$\\(pwd\\)/strix_saas_verify.db\" uv run uvicorn app.main:app --port 8010)",
+      "Bash(echo \"PID $!\")",
+      "Bash(curl -s http://127.0.0.1:8010/api/health)",
+      "Bash(jobs -p)",
+      "Bash(xargs -r kill)",
+      "Bash(rm -f /Users/maruti/Documents/TSGit/strix/saas/backend/strix_saas_verify.db /tmp/cj_admin.txt /tmp/cj_member.txt /tmp/saas_backend_verify.log)",
+      "Bash(git rev-list *)",
+      "Bash(git rebase *)",
+      "Bash(git stash *)"
+    ],
+    "additionalDirectories": [
+      "/private/tmp",
+      "/tmp"
+    ]
+  }
+}
